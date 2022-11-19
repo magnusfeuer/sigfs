@@ -26,23 +26,28 @@ namespace sigfs {
     public:
         using id_t = std::uint64_t;
         Signal(void):
+            data_(0),
+            data_size_(0),
+            data_alloc_(0),
             sig_id_(0)
         {
         }
 
         ~Signal(void)
         {
+            if (data_)
+                delete[] data_;
         }
 
 
         inline const char* const data(void) const
         {
-            return data_.data();
+            return data_;
         }
 
         inline const size_t data_size(void) const
         {
-            return data_.size();
+            return data_size_;
         }
 
         // Not thread safe! Caller must manage locks
@@ -59,12 +64,25 @@ namespace sigfs {
 
         inline void set(const id_t sig_id, const char* data, const size_t data_size)
         {
-            data_ = std::vector<char>(data, data+data_size);
+            // First time allocation?
+            if (data_size > data_size_) {
+                if (data_)
+                    delete[] data_;
+
+                data_ = new char[data_size];
+                data_alloc_ = data_size;
+            }
+
+            data_size_ = data_size;
+            memcpy(data_, data, data_size_);
             sig_id_ = sig_id;
         }
 
     private:
-        std::vector<char> data_;
+//        std::vector<char> data_;
+        char* data_;
+        size_t data_size_;
+        size_t data_alloc_;
         id_t sig_id_;
     };
 

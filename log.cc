@@ -46,6 +46,11 @@ usec_timestamp_t sigfs_usec_monotonic_timestamp(void)
     return (usec_timestamp_t) res.tv_sec * 1000000 + res.tv_nsec / 1000;
 }
 
+usec_timestamp_t sigfs_usec_since_start(void)
+{
+    return sigfs_usec_monotonic_timestamp() - start_time;
+}
+
 void sigfs_log_set_start_time(void)
 {
     start_time = sigfs_usec_monotonic_timestamp();

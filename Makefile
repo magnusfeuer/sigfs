@@ -39,12 +39,15 @@ DESTDIR ?= /usr/local
 export DESTDIR
 
 
-CXXFLAGS ?=-DSIGFS_LOG -ggdb ${INCLUDES} -std=c++17 -Wall -pthread 
+debug: CXXFLAGS ?=-DSIGFS_LOG -ggdb ${INCLUDES} -std=c++17 -Wall -pthread 
+CXXFLAGS ?=-O3 ${INCLUDES} -std=c++17 -Wall -pthread 
 
-#!
+#
 # Build the entire project.
 #
 all:  ${SIGFS} ${SIGFS_PUBLISH} ${SIGFS_SUBSCRIBE} test
+
+debug: ${SIGFS} ${SIGFS_PUBLISH} ${SIGFS_SUBSCRIBE} test
 
 #
 #	Rebuild the static target library.
@@ -105,11 +108,11 @@ uninstall:
 # Build tests only
 #
 test: 
-	${MAKE} -C test
+	${MAKE} CXXFLAGS="${CXXFLAGS}" -C test
 
 
 #
 #	Install the generated example files.
 #
 install_test:
-	${MAKE} DESTDIR=${DESTDIR} -C test install
+	${MAKE} DESTDIR="${DESTDIR}" -C test install

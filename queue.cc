@@ -42,10 +42,10 @@ Queue::~Queue(void)
 
 void Queue::dump(const char* prefix, const Subscriber* sub)
 {
-    index_t ind = 0;
-    char suffix[512];
 
 #ifdef SIGFS_LOG
+    index_t ind = 0;
+    char suffix[512];
     while(ind < queue_.size()) {
         strcpy(suffix, "<-- ");
         if (ind == tail())
@@ -230,7 +230,7 @@ const Result Queue::next_signal(Subscriber* sub,
 
     // Bump signal id in preparation for the next signal.
     sub->set_sig_id(sub->sig_id() + 1);
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "next_signal(): Done.");
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "next_signal(): %d bytes copied. Done", returned_size);
 
     return Result::ok;
 }

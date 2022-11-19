@@ -25,6 +25,8 @@
 #include <errno.h>
 #include <cstdlib>
 #include <cassert>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 void usage(const char* name)
 {
@@ -58,20 +60,23 @@ void usage(const char* name)
 }
 
 
-void publish_signal_sequence(const char* test_id, sigfs::Queue* queue, const char* prefix, int count)
+void publish_signal_sequence(const char* test_id, sigfs::Queue* queue, const int publish_id, int count)
 {
-    int ind{0};
+    int sig_id{0};
     char buf[256];
-    int prefix_len {(int) strlen(prefix)};
-
-    strcpy(buf, prefix);
 
     SIGFS_LOG_DEBUG("%s: Called. Publishing %d signals", test_id, count);
 
-    for(ind = 0; ind < count; ++ind) {
+    for(sig_id = 0; sig_id < count; ++sig_id) {
+        *((int*) buf) = publish_id;
+        *((int*) (buf + sizeof(int))) = sig_id;
+        SIGFS_LOG_DEBUG("%s: Publishing signal [%.8X][%.8X] (%.8X %.8X)",
+                        test_id,
+                        *((int*) buf),
+                        *((int*) (buf + sizeof(int))),
+                        publish_id, sig_id);
 
-        sprintf(buf + prefix_len, "%d", ind);
-        assert(queue->queue_signal(buf, strlen(buf) + 1) == sigfs::Result::ok);
+        assert(queue->queue_signal(buf, 2*sizeof(int)) == sigfs::Result::ok);
     }
     SIGFS_LOG_DEBUG("%s: Done. Published %d signals", test_id, count);
 }
@@ -91,31 +96,29 @@ void publish_signal_sequence(const char* test_id, sigfs::Queue* queue, const cha
 // 'count' is the number of signals to expect (starting with signal 0).
 //
 // Signals from each publisher are expected to have the format
-// ("%s%d", prefix, signal_id), where signal_id is 0..(count-1)
+// <prefix_id (4 bytes)><sequence_id (4 bytes)>
+
 //
 void check_signal_sequence(const char* test_id,
                            sigfs::Subscriber* sub,
-                           const char* const*prefixes,
+                           const int* prefix_ids,
                            int prefix_count,
                            int count)
 {
-    int prefix_length[prefix_count];
-    int expect_sigid[prefix_count];
+    int expect_sigid[prefix_count] = {};
     char payload[256];
     size_t res{0};
     sigfs::Queue::index_t lost_signals{0};
     int prefix_ind = 0;
 
-    // Setup prefix length and expect_sigid
-    prefix_ind = 0;
-    while(prefix_ind < prefix_count) {
-        prefix_length[prefix_ind] = strlen(prefixes[prefix_ind]);
-        expect_sigid[prefix_ind] = 0;
-        ++prefix_ind;
-    }
 
     while(count--) {
         assert(sub->queue().next_signal(sub, payload, sizeof(payload), res, lost_signals) == sigfs::Result::ok);
+
+        if (res != 2*sizeof(int)) {
+            SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Expected %d bytes, got %d bytes,", test_id, 2*sizeof(int), res);
+            exit(0);
+        }
 
         // Did we lose signals?
         if (lost_signals > 0) {
@@ -126,42 +129,46 @@ void check_signal_sequence(const char* test_id,
         // Find correct prefix
         for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
             SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                                  "%s: Checking payload [%-*s] first %d bytes against  prefix [%s]",
+                                  "%s: Checking payload first four bytes [%.8X] bytes against prefix [%.8X]",
                                   test_id,
-                                  (int) res-1, payload,
-                                  prefix_length[prefix_ind],
-                                  prefixes[prefix_ind]);
+                                  *((int*)payload),
+                                  prefix_ids[prefix_ind]);
 
-            if (!memcmp(payload, prefixes[prefix_ind], prefix_length[prefix_ind]))
+            if (*((int*)payload) == prefix_ids[prefix_ind])
                 break;
         }
 
         // Did we not recognize prefix?
         if (prefix_ind == prefix_count) {
             SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                  "%s: Did not recognize any prefix in received signal %-*s",
-                                  test_id, (int) res-1, payload); 
+                                  "%s: No prefix matched first four payload bytes [%.8X]",
+                                  test_id,
+                                  *((int*) payload));
 
             SIGFS_LOG_INDEX_FATAL(sub->sub_id(),  "%s: Available prefixes are:", test_id);
 
             for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
                 SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                      "%s:   [%s]",
-                                      test_id, prefixes[prefix_ind]);
+                                      "%s:   [%.8X]",
+                                      test_id, prefix_ids[prefix_ind]);
             }
             exit(1);
         }
 
         SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                              "%s: Comparing expected [%s][%d] with payload [%-*s]. Prefix length[%d]",
-                              test_id, prefixes[prefix_ind],
-                              expect_sigid[prefix_ind], (int) res-1, payload,prefix_length[prefix_ind]);
+                              "%s: Comparing expected signal ID [%.8X][%.8X] with received [%.8X][%.8X]",
+                              test_id, prefix_ids[prefix_ind], expect_sigid[prefix_ind],
+                              *((int*) payload),
+                              *((int*) (payload + sizeof(int))));
 
         // Check that the rest of the signal payload after prefix matches expectations.
-        if (atoi(&payload[prefix_length[prefix_ind]]) != expect_sigid[prefix_ind]) {
+        if (*((int*) (payload + sizeof(int))) != expect_sigid[prefix_ind]) {
             SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                   "%s: Expected signal [%s%d], got [%-*s]",
-                            test_id, prefixes[prefix_ind], expect_sigid[prefix_ind], (int) res-1, payload);
+                                  "%s: Expected signal ID [%.8X][%.8X], received [%.8X][%.8X]",
+                                  test_id, prefix_ids[prefix_ind], expect_sigid[prefix_ind],
+                                  *((int*) payload),
+                                  *((int*) (payload + sizeof(int))));
+
             exit(1);
         }
 
@@ -238,6 +245,8 @@ int main(int argc,  char *const* argv)
         sigfs_log_level_set(SIGFS_LOG_LEVEL_INFO);
 
 
+
+    puts("Start");
 
     //
     // We use a shared g_queu/sub1/sub2 scope for 1.0-1.4 since
@@ -361,23 +370,19 @@ int main(int argc,  char *const* argv)
         //
         // Make queue length fairly small to ensure wrapping.
         //
-        Queue* g_queue{new Queue(4096)};
-        SIGFS_LOG_INFO("START: 2.0");
+        Queue* g_queue{new Queue(2048)};
 
-        // Create publisher thread A
-        publish_signal_sequence("2.0.1", g_queue, "A", 1200);
+        // // Create publisher thread A
         std::thread pub_thr_a (
             [g_queue]() {
-                usleep(300000);
-                publish_signal_sequence("2.0.1", g_queue, "A", 1200);
+                publish_signal_sequence("2.0.1", g_queue, 1, 1200);
             });
 
 
         // Create publisher thread B
         std::thread pub_thr_b (
             [=]() {
-                usleep(300000);
-                publish_signal_sequence("2.0.2", g_queue, "B", 1200);
+                publish_signal_sequence("2.0.2", g_queue, 2, 1200);
             });
 
 
@@ -385,7 +390,7 @@ int main(int argc,  char *const* argv)
         // signals can be read in sequence without loss by
         // the single subscriber.
         //
-        const char* prefixes[]= { "A", "B" };
+        const int prefixes[]= { 1, 2 };
         Subscriber *sub1{new Subscriber(*g_queue)};
         check_signal_sequence("2.0.3", sub1, prefixes, 2, 2400);
 
@@ -408,51 +413,89 @@ int main(int argc,  char *const* argv)
     // then pump two separate sequence of signals as fast as they can.
     // Have a single subscriber check for signal consistency
     {
-        SIGFS_LOG_INFO("START: 2.1");
-        Queue* g_queue(new Queue(1024));
+        sigfs_log_set_start_time();
+        Queue* g_queue(new Queue(131072));
         Subscriber* sub1(new Subscriber(*g_queue));
         Subscriber* sub2(new Subscriber(*g_queue));
         Subscriber* sub3(new Subscriber(*g_queue));
+        const int prefixes[]= { 1,2 };
+
+        // Create subscriber thread 1
+        std::thread sub_thr_1 (
+            [g_queue, sub1, prefixes]() {
+                struct sched_param sp;
+                sp.sched_priority = 1;
+                if (pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp)) {
+                    printf("FAILED: %s\n", strerror(errno));
+                    puts("Maybe run as root?");
+                    exit(1);
+                }
+                assert(pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp) == 0);
+                check_signal_sequence("2.1.3", sub1, prefixes, 2, 200000);
+            });
+
+        // Create subscriber thread 2
+        std::thread sub_thr_2 (
+            [g_queue, sub2, prefixes]() {
+                struct sched_param sp;
+                sp.sched_priority = 1;
+                if (pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp)) {
+                    printf("FAILED: %s\n", strerror(errno));
+                    puts("Maybe run as root?");
+                    exit(1);
+                }
+                assert(pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp) == 0);
+                check_signal_sequence("2.1.4", sub2, prefixes, 2, 200000);
+            });
+
+        // Create subscriber thread 3
+        std::thread sub_thr_3 (
+            [g_queue, sub3, prefixes]() {
+                struct sched_param sp;
+                sp.sched_priority = 1;
+                if (pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp)) {
+                    printf("FAILED: %s\n", strerror(errno));
+                    puts("Maybe run as root?");
+                    exit(1);
+                }
+
+                check_signal_sequence("2.1.5", sub3, prefixes, 2, 200000);
+            });
 
         // Create publisher thread a
         std::thread pub_thr_a (
             [g_queue]() {
-                usleep(300000);
-                publish_signal_sequence("2.0.1", g_queue, "A", 1000);
+                struct sched_param sp;
+                sp.sched_priority = 1;
+                if (pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp)) {
+                    printf("FAILED: %s\n", strerror(errno));
+                    puts("Maybe run as root?");
+                    exit(1);
+                }
+                publish_signal_sequence("2.1.1", g_queue, 1, 100000);
             });
 
 
         // Create publisher thread b
         std::thread pub_thr_b (
             [g_queue]() {
-                usleep(300000);
-                publish_signal_sequence("2.0.2", g_queue, "B", 1000);
+                struct sched_param sp;
+                sp.sched_priority = 1;
+                if (pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp)) {
+                    printf("FAILED: %s\n", strerror(errno));
+                    puts("Maybe run as root?");
+                    exit(1);
+                }
+                publish_signal_sequence("2.1.2", g_queue, 2, 100000);
             });
 
 
-        const char* prefixes[]= { "A", "B" };
-        // Create subscriber thread 1
-        std::thread sub_thr_1 (
-            [g_queue, sub1, prefixes]() {
-                check_signal_sequence("2.0.3", sub1, prefixes, 2, 2000);
-            });
-
-        // Create subscriber thread 2
-        std::thread sub_thr_2 (
-            [g_queue, sub2, prefixes]() {
-                check_signal_sequence("2.0.3", sub2, prefixes, 2, 2000);
-            });
-
-        // Create subscriber thread 3
-        std::thread sub_thr_3 (
-            [g_queue, sub3, prefixes]() {
-                check_signal_sequence("2.0.3", sub3, prefixes, 2, 2000);
-            });
 
 
         // Join threads.
         pub_thr_a.join();
         pub_thr_b.join();
+
         sub_thr_1.join();
         sub_thr_2.join();
         sub_thr_3.join();
@@ -461,6 +504,11 @@ int main(int argc,  char *const* argv)
         delete sub1;
         delete sub2;
         delete g_queue;
+        SIGFS_LOG_INFO("PASS: 2.1");
+
+        usec_timestamp_t done = sigfs_usec_since_start();
+
+        printf("Done. Execution time: %ld microseconds\n", done);
     }
     exit(0);
 }

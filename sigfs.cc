@@ -262,8 +262,10 @@ static int do_statfs (const char* path, struct statvfs* stat)
 
 static int do_flush (const char* path, struct fuse_file_info* fi)
 {
+#ifdef SIGFS_LOG
     Subscriber* sub((Subscriber*) fi->fh);
     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_flush(): Returning ok");
+#endif
     errno = 0;
     return 0;
 }
@@ -279,8 +281,10 @@ static int do_release (const char* path, struct fuse_file_info* fi)
 
 static int do_fsync (const char* path, int wtf, struct fuse_file_info* fi)
 {
+#ifdef SIGFS_LOG
     Subscriber* sub((Subscriber*) fi->fh);
     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_fsync(): Returning EPERM");
+#endif
     return -EPERM;
 }
 
@@ -346,7 +350,9 @@ static int do_read(const char *path,
 static int do_write( const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi )
 {
     sigfs_signal_t* sig((sigfs_signal_t*) buffer);
+#ifdef SIGFS_LOG
     Subscriber* sub((Subscriber*) fi->fh);
+#endif
     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(%s): Called", path);
 
     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  offset:            %lu", offset );

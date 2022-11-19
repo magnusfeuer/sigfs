@@ -31,6 +31,8 @@ extern "C" {
 
     extern char* sigfs_log_timestamp(char* target);
     extern void sigfs_log_set_start_time(void);
+    extern usec_timestamp_t sigfs_usec_since_start(void);
+    extern usec_timestamp_t sigfs_usec_monotonic_timestamp(void);
     extern usec_timestamp_t sigfs_log_get_start_time(void);
     extern void sigfs_log_use_color(int use_color);
     extern int sigfs_log_level_set(int log_level);

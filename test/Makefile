@@ -25,13 +25,14 @@ DESTDIR ?= /usr/local
 export DESTDIR
 
 
-CXXFLAGS ?=-DSIGFS_LOG -ggdb ${INCLUDES} -std=c++17 -Wall -pthread
+debug: CXXFLAGS ?=-DSIGFS_LOG -ggdb ${INCLUDES} -std=c++17 -Wall -pthread 
+CXXFLAGS ?=-O3 ${INCLUDES} -std=c++17 -Wall -pthread 
 
 #
 # Build the entire project.
 #
 all:  ${SIGFS_TEST} 
-
+debug: ${SIGFS_TEST} 
 #
 #	Rebuild the static target library.
 #
