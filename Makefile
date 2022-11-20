@@ -107,7 +107,7 @@ uninstall:
 #
 # Build tests only
 #
-test: 
+test:	${SIGFS}
 	${MAKE} CXXFLAGS="${CXXFLAGS}" -C test
 
 

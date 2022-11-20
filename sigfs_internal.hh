@@ -117,7 +117,7 @@ namespace sigfs {
                                  size_t& returned_size,
                                  index_t &lost_signal_count) const;
 
-        const bool would_block(const Subscriber* sub) const;
+        const bool signal_available(const Subscriber* sub) const;
 
 
         inline index_t queue_length(void) const {
@@ -189,6 +189,15 @@ namespace sigfs {
 
         mutable std::mutex mutex_;
         mutable std::condition_variable cond_;
+
+
+        // Conditional variable setup used to
+        // ensure that subscriber threads always have priority
+        //
+        mutable std::mutex prio_mutex_;
+        mutable std::condition_variable prio_cond_;
+        mutable int active_subscribers_;
+
         Signal::id_t next_sig_id_; // Monotonic transaction id.
         std::vector< Signal > queue_;
         index_t queue_mask_;

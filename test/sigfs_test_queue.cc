@@ -247,6 +247,7 @@ int main(int argc,  char *const* argv)
 
 
     puts("Start");
+    sigfs_log_set_start_time();
 
     //
     // We use a shared g_queu/sub1/sub2 scope for 1.0-1.4 since
@@ -288,17 +289,17 @@ int main(int argc,  char *const* argv)
         SIGFS_LOG_DEBUG("START: 1.2");
 
         // Check that sub1, which have read all signals up to and
-        // including SIG002, would block.
-        assert(g_queue->would_block(sub1));
+        // including SIG002, has no more signals
+        assert(!g_queue->signal_available(sub1));
 
         // Check that sub2, which still has SIG001 and SIG002 to read,
-        // would not block
+        // has signals available
         //
-        assert(!g_queue->would_block(sub2));
+        assert(g_queue->signal_available(sub2));
         check_signal("1.2.1", sub2, "SIG001", 7, 0);
-        assert(!g_queue->would_block(sub2));
+        assert(g_queue->signal_available(sub2));
         check_signal("1.2.2", sub2, "SIG002", 7, 0);
-        assert(g_queue->would_block(sub2));
+        assert(!g_queue->signal_available(sub2));
 
 
         // TEST 1.3
@@ -370,6 +371,7 @@ int main(int argc,  char *const* argv)
         //
         // Make queue length fairly small to ensure wrapping.
         //
+        SIGFS_LOG_DEBUG("START: 2.0");
         Queue* g_queue{new Queue(2048)};
 
         // // Create publisher thread A
@@ -395,7 +397,7 @@ int main(int argc,  char *const* argv)
         check_signal_sequence("2.0.3", sub1, prefixes, 2, 2400);
 
         // Check that we got all signals and no more are ready to be read
-        assert(g_queue->would_block(sub1));
+        assert(!g_queue->signal_available(sub1));
 
         // Join threads.
         pub_thr_a.join();
@@ -413,7 +415,6 @@ int main(int argc,  char *const* argv)
     // then pump two separate sequence of signals as fast as they can.
     // Have a single subscriber check for signal consistency
     {
-        sigfs_log_set_start_time();
         Queue* g_queue(new Queue(131072));
         Subscriber* sub1(new Subscriber(*g_queue));
         Subscriber* sub2(new Subscriber(*g_queue));
@@ -423,55 +424,24 @@ int main(int argc,  char *const* argv)
         // Create subscriber thread 1
         std::thread sub_thr_1 (
             [g_queue, sub1, prefixes]() {
-                struct sched_param sp;
-                sp.sched_priority = 1;
-                if (pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp)) {
-                    printf("FAILED: %s\n", strerror(errno));
-                    puts("Maybe run as root?");
-                    exit(1);
-                }
-                assert(pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp) == 0);
                 check_signal_sequence("2.1.3", sub1, prefixes, 2, 200000);
             });
 
         // Create subscriber thread 2
         std::thread sub_thr_2 (
             [g_queue, sub2, prefixes]() {
-                struct sched_param sp;
-                sp.sched_priority = 1;
-                if (pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp)) {
-                    printf("FAILED: %s\n", strerror(errno));
-                    puts("Maybe run as root?");
-                    exit(1);
-                }
-                assert(pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp) == 0);
                 check_signal_sequence("2.1.4", sub2, prefixes, 2, 200000);
             });
 
         // Create subscriber thread 3
         std::thread sub_thr_3 (
             [g_queue, sub3, prefixes]() {
-                struct sched_param sp;
-                sp.sched_priority = 1;
-                if (pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp)) {
-                    printf("FAILED: %s\n", strerror(errno));
-                    puts("Maybe run as root?");
-                    exit(1);
-                }
-
                 check_signal_sequence("2.1.5", sub3, prefixes, 2, 200000);
             });
 
         // Create publisher thread a
         std::thread pub_thr_a (
             [g_queue]() {
-                struct sched_param sp;
-                sp.sched_priority = 1;
-                if (pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp)) {
-                    printf("FAILED: %s\n", strerror(errno));
-                    puts("Maybe run as root?");
-                    exit(1);
-                }
                 publish_signal_sequence("2.1.1", g_queue, 1, 100000);
             });
 
@@ -479,17 +449,8 @@ int main(int argc,  char *const* argv)
         // Create publisher thread b
         std::thread pub_thr_b (
             [g_queue]() {
-                struct sched_param sp;
-                sp.sched_priority = 1;
-                if (pthread_setschedparam(pthread_self(), SCHED_FIFO , &sp)) {
-                    printf("FAILED: %s\n", strerror(errno));
-                    puts("Maybe run as root?");
-                    exit(1);
-                }
                 publish_signal_sequence("2.1.2", g_queue, 2, 100000);
             });
-
-
 
 
         // Join threads.
@@ -505,10 +466,9 @@ int main(int argc,  char *const* argv)
         delete sub2;
         delete g_queue;
         SIGFS_LOG_INFO("PASS: 2.1");
-
-        usec_timestamp_t done = sigfs_usec_since_start();
-
-        printf("Done. Execution time: %ld microseconds\n", done);
     }
+    usec_timestamp_t done = sigfs_usec_since_start();
+    printf("Done. Execution time: %ld microseconds\n", done);
+
     exit(0);
 }

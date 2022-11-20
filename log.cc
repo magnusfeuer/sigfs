@@ -15,7 +15,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <time.h>
-#include <pthread.h>
+#include <thread>
+#include <mutex>
 
 static usec_timestamp_t start_time = 0;
 
@@ -222,6 +223,10 @@ void sigfs_log(int log_level, const char* func, const char* file, int line, int 
     const char* tag = 0;
     char index_str[32];
     va_list ap;
+    static std::mutex mutex_;
+
+    std::unique_lock lock(mutex_);
+
 
     // Set start time, if necessary
     if (!sigfs_log_get_start_time())

@@ -6,7 +6,7 @@
 .PHONY: all clean distclean install uninstall 
 
 EXT_HDR=../sigfs.h 
-HDR=${EXT_HDR} ../sigfs_internal.hh ../log.h
+HDR=${EXT_HDR} ../sigfs_internal.hh ../log.h 
 
 
 INCLUDES=-I/usr/local/include
@@ -15,11 +15,18 @@ COMMON_SRC=../log.cc ../queue.cc ../signal.cc
 COMMON_OBJ=${patsubst %.cc, %.o, ${COMMON_SRC}}
 
 #
-# Signal FS main process
+# Queue integrity and stress test
 #
-SIGFSTEST_QUEUE_SRC=sigfs_test_queue.cc
-SIGFSTEST_QUEUE_OBJ=${patsubst %.cc, %.o, ${SIGFSTEST_QUEUE_SRC}}
-SIGFS_TEST=sigfs_test_queue
+SIGFS_TEST_QUEUE_SRC=sigfs_test_queue.cc
+SIGFS_TEST_QUEUE_OBJ=${patsubst %.cc, %.o, ${SIGFS_TEST_QUEUE_SRC}}
+SIGFS_TEST_QUEUE=sigfs_test_queue
+
+#
+# Speed test
+#
+SIGFS_TEST_SPEED_SRC=sigfs_test_speed.cc
+SIGFS_TEST_SPEED_OBJ=${patsubst %.cc, %.o, ${SIGFS_TEST_SPEED_SRC}}
+SIGFS_TEST_SPEED=sigfs_test_speed
 
 DESTDIR ?= /usr/local
 export DESTDIR
@@ -31,16 +38,22 @@ CXXFLAGS ?=-O3 ${INCLUDES} -std=c++17 -Wall -pthread
 #
 # Build the entire project.
 #
-all:  ${SIGFS_TEST} 
-debug: ${SIGFS_TEST} 
+all:  ${SIGFS_TEST_QUEUE}  ${SIGFS_TEST_SPEED} 
+debug: ${SIGFS_TEST_QUEUE} ${SIGFS_TEST_SPEED} 
+
 #
 #	Rebuild the static target library.
 #
-${SIGFS_TEST}: ${SIGFSTEST_QUEUE_OBJ} ${COMMON_OBJ}
-	${CXX} -o ${SIGFS_TEST} ${SIGFSTEST_QUEUE_OBJ} ${COMMON_OBJ} ${CXXFLAGS}
+${SIGFS_TEST_QUEUE}: ${SIGFS_TEST_QUEUE_OBJ} ${COMMON_OBJ}
+	${CXX} -o ${SIGFS_TEST_QUEUE} ${SIGFS_TEST_QUEUE_OBJ} ${COMMON_OBJ} ${CXXFLAGS}
+
+${SIGFS_TEST_SPEED}: ${SIGFS_TEST_SPEED_OBJ} ${COMMON_OBJ}
+	${CXX} -o ${SIGFS_TEST_SPEED} ${SIGFS_TEST_SPEED_OBJ} ${COMMON_OBJ} ${CXXFLAGS}
 
 
-${SIGFSTEST_QUEUE_OBJ}: ${HDR}
+${SIGFS_TEST_QUEUE_OBJ}: ${HDR}
+
+${SIGFS_TEST_SPEED_OBJ}: ${HDR}
 
 
 #
@@ -49,7 +62,7 @@ ${SIGFSTEST_QUEUE_OBJ}: ${HDR}
 #	clean up the submodules.
 #
 clean:
-	rm -f  ${SIGFSTEST_QUEUE_OBJ} *~ ${SIGFS_TEST} 
+	rm -f  ${SIGFS_TEST_QUEUE_OBJ} ${SIGFS_TEST_QUEUE} ${SIGFS_TEST_SPEED_OBJ} ${SIGFS_TEST_SPEED}  *~
 
 
 #
@@ -61,13 +74,15 @@ distclean: clean
 #
 #	Install the generated files.
 #
-ninstall:  ${SIGFS}
+install:  ${SIGFS}
 	install -d ${DESTDIR}/bin; \
-	install -m 0644 ${SIGFS_TEST}  ${DESTDIR}/bin; 
+	install -m 0644 ${SIGFS_TEST_QUEUE}  ${DESTDIR}/bin; 
+	install -m 0644 ${SIGFS_TEST_SPEED}  ${DESTDIR}/bin; 
 
 #
 #	Uninstall the generated files.
 #
 uninstall:
-	rm -f ${DESTDIR}/bin/${SIGFS_TEST}; 
+	rm -f ${DESTDIR}/bin/${SIGFS_TEST_QUEUE}; 
+	rm -f ${DESTDIR}/bin/${SIGFS_TEST_SPEED}; 
 
