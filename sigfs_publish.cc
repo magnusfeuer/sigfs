@@ -10,7 +10,7 @@
 // Simple publisher that writes signal(s) to a sigfs file.
 //
 #include <getopt.h>
-#include "sigfs.h"
+#include "sigfs.hh"
 #include <string>
 #include <iostream>
 #include <memory.h>
@@ -92,26 +92,22 @@ int main(int argc,  char *const* argv)
     }
 
     // Create a buffer that can host our data string plus whatever number we put in
-    char buf[sizeof(sigfs_signal_t) + strlen(fmt_string) + 100]; 
-    sigfs_signal_t *sig((sigfs_signal_t*) buf);
+    char buf[strlen(fmt_string) + 100]; 
 
     int ind = 0;
     while(ind < count) {
-        sig->lost_signals = 0;
+        sprintf(buf, fmt_string, ind);
 
-        sprintf(sig->data, fmt_string, ind);
-        sig->data_size = strlen(sig->data) + 1; 
-
-        ssize_t write_res = write(fd, buf, sizeof(sigfs_signal_t) + sig->data_size + 1);
+        ssize_t write_res = write(fd, buf, strlen(buf)+1);
         if (write_res == -1) {
-            std::cout << "Failed to write " << sizeof(sigfs_signal_t) + sig->data_size + 1 << " bytes to file " << file << ": " << strerror(errno) << std::endl;
+            std::cout << "Failed to write " << strlen(buf)+1 << " bytes to file " << file << ": " << strerror(errno) << std::endl;
             exit(255);
         }
 
         if (usec_sleep)
             usleep(usec_sleep);
 
-        std::cout << "Wrote " << sizeof(sigfs_signal_t) + sig->data_size + 1 << " bytes to file " << file << ": " << sig->data << std::endl;
+        std::cout << "Wrote " << strlen(buf)+1 << " bytes to file " << file << ": " << buf << std::endl;
         ++ind;
     }
     close(fd);

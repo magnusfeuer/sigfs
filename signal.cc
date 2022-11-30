@@ -7,7 +7,7 @@
 //
 
 
-#include "sigfs_internal.hh"
+#include "sigfs.hh"
 
 using namespace sigfs;
 

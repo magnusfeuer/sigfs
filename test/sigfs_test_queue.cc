@@ -11,8 +11,7 @@
 //
 
 #include <getopt.h>
-#include "../sigfs.h"
-#include "../sigfs_internal.hh"
+#include "../sigfs.hh"
 #include "../log.h"
 #include <string>
 #include <iostream>
@@ -25,8 +24,11 @@
 #include <errno.h>
 #include <cstdlib>
 #include <cassert>
+#include <thread>
 #include <sys/time.h>
 #include <sys/resource.h>
+
+#include "../queue_impl.hh"
 
 void usage(const char* name)
 {
@@ -36,27 +38,33 @@ void usage(const char* name)
     std::cout << "        -s <usec> | --sleep=<usec>" << std::endl;
 }
 
-#define check_signal(prefix, sub, wanted_data, wanted_res, wanted_lost_signals) { \
-    char buf[1024];                                                     \
-    size_t res{0};                                                      \
-    Queue::index_t lost_signals{0};                                     \
-    memset(buf, 0, sizeof(buf));                                        \
-    assert(g_queue->next_signal(sub, buf, sizeof(buf), res, lost_signals) == sigfs::Result::ok); \
-    if (res != wanted_res) {                                            \
-        SIGFS_LOG_FATAL("%s: Wanted result %lu. Got %lu", prefix, wanted_res, res); \
-        g_queue->dump(prefix, sub);                                      \
-        exit(1);                                                        \
-    }                                                                   \
-    if (memcmp(buf, wanted_data, res)) {                                \
-        SIGFS_LOG_FATAL("%s: Wanted data [%-*s]. Got [%-*s]", prefix, (int) res, wanted_data, (int) res, buf); \
-        g_queue->dump(prefix, sub);                                      \
-        exit(1);                                                        \
-    }                                                                   \
-    if (lost_signals != wanted_lost_signals) {                          \
-        SIGFS_LOG_FATAL("%s: Wanted lost signals %lu. Got %lu", prefix, wanted_lost_signals, lost_signals); \
-        g_queue->dump(prefix, sub);                                     \
-        exit(1);                                                        \
-    }                                                                   \
+void check_signal(sigfs::Queue* queue, const char* prefix, sigfs::Subscriber* sub, const char* wanted_data, int wanted_res, int wanted_lost_signals)
+{
+    char buf[1024];
+
+    memset(buf, 0, sizeof(buf));
+
+    sigfs::signal_callback_t<void*> cb =
+        [queue, prefix, wanted_res, sub, wanted_data, wanted_lost_signals](void* userdata, const sigfs::signal_t* signal) {
+            if ((int) signal->payload->data_size != wanted_res) {
+                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted %lu bytes. Got %lu bytes", prefix, wanted_res, signal->payload->data_size);
+                queue->dump(prefix, sub);
+                exit(1);
+            }
+            if (memcmp(signal->payload->data, wanted_data, signal->payload->data_size)) {
+                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted data [%-*s]. Got [%-*s]", prefix, wanted_res, wanted_data, (int) signal->payload->data_size, signal->payload->data);
+                queue->dump(prefix, sub);
+                exit(1);
+            }
+            if ((int) signal->lost_signals != wanted_lost_signals) {
+                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted lost signals %lu. Got %lu", prefix, wanted_lost_signals, signal->lost_signals);
+                queue->dump(prefix, sub);
+                exit(1);
+            }
+        };
+
+    assert(queue->dequeue_signal<void*>(sub, 0, cb) == sigfs::Result::ok);
+
 }
 
 
@@ -106,75 +114,88 @@ void check_signal_sequence(const char* test_id,
                            int count)
 {
     int expect_sigid[prefix_count] = {};
-    char payload[256];
-    size_t res{0};
-    sigfs::Queue::index_t lost_signals{0};
-    int prefix_ind = 0;
 
 
     while(count--) {
-        assert(sub->queue().next_signal(sub, payload, sizeof(payload), res, lost_signals) == sigfs::Result::ok);
+        //
+        // We do the callback since signal is a part of a locked context in queue.cc
+        // Once this lambda returns, signal will be undefined.
+        //
+        sigfs::signal_callback_t<void*> cb =
+            [test_id, sub, prefix_count, prefix_ids, &expect_sigid](void* x, const sigfs::signal_t* signal) {
+                int prefix_ind{0};
+                (void) x;
 
-        if (res != 2*sizeof(int)) {
-            SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Expected %d bytes, got %d bytes,", test_id, 2*sizeof(int), res);
-            exit(0);
-        }
+                if (signal->payload->data_size != 2*sizeof(int)) {
+                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Expected %d bytes, got %d bytes,",
+                                          test_id, 2*sizeof(int), signal->payload->data_size);
+                    exit(0);
+                }
 
-        // Did we lose signals?
-        if (lost_signals > 0) {
-            SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Lost %d signals,", test_id, lost_signals);
-            exit(0);
-        }
+                // Did we lose signals?
+                if (signal->lost_signals > 0) {
+                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Lost %d signals,", test_id, signal->lost_signals);
+                    exit(0);
+                }
 
-        // Find correct prefix
-        for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                                  "%s: Checking payload first four bytes [%.8X] bytes against prefix [%.8X]",
-                                  test_id,
-                                  *((int*)payload),
-                                  prefix_ids[prefix_ind]);
+                for(std::uint32_t ind = 0; ind < signal->payload->data_size; ++ind) {
+                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
+                                          "%s: Byte %d: %.2X", test_id, ind, (char) signal->payload->data[ind]);
+                }
+                // Find correct prefix
+                for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
+                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
+                                          "%s: Checking payload first four bytes [%.8X] bytes against prefix [%.8X]",
+                                          test_id,
+                                          *((int*) signal->payload->data),
+                                          prefix_ids[prefix_ind]);
 
-            if (*((int*)payload) == prefix_ids[prefix_ind])
-                break;
-        }
+                    if (*((int*)signal->payload->data) == prefix_ids[prefix_ind])
+                        break;
+                }
 
-        // Did we not recognize prefix?
-        if (prefix_ind == prefix_count) {
-            SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                  "%s: No prefix matched first four payload bytes [%.8X]",
-                                  test_id,
-                                  *((int*) payload));
+                // Did we not recognize prefix?
+                if (prefix_ind == prefix_count) {
+                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
+                                          "%s: No prefix matched first four payload bytes [%.8X]",
+                                          test_id,
+                                          *((int*) signal->payload->data));
 
-            SIGFS_LOG_INDEX_FATAL(sub->sub_id(),  "%s: Available prefixes are:", test_id);
+                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(),  "%s: Available prefixes are:", test_id);
 
-            for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                      "%s:   [%.8X]",
-                                      test_id, prefix_ids[prefix_ind]);
-            }
-            exit(1);
-        }
+                    for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
+                        SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
+                                              "%s:   [%.8X]",
+                                              test_id, prefix_ids[prefix_ind]);
+                    }
+                    exit(1);
+                }
 
-        SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                              "%s: Comparing expected signal ID [%.8X][%.8X] with received [%.8X][%.8X]",
-                              test_id, prefix_ids[prefix_ind], expect_sigid[prefix_ind],
-                              *((int*) payload),
-                              *((int*) (payload + sizeof(int))));
+                SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
+                                      "%s: Comparing expected signal ID [%.8X][%.8X] with received [%.8X][%.8X]",
+                                      test_id,
+                                      prefix_ids[prefix_ind], expect_sigid[prefix_ind],
+                                      *((int*) signal->payload->data),
+                                      *((int*) (signal->payload->data + sizeof(int))));
 
-        // Check that the rest of the signal payload after prefix matches expectations.
-        if (*((int*) (payload + sizeof(int))) != expect_sigid[prefix_ind]) {
-            SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                  "%s: Expected signal ID [%.8X][%.8X], received [%.8X][%.8X]",
-                                  test_id, prefix_ids[prefix_ind], expect_sigid[prefix_ind],
-                                  *((int*) payload),
-                                  *((int*) (payload + sizeof(int))));
+                // Check that the rest of the signal payload after prefix matches expectations.
+                if (*((int*) (signal->payload->data + sizeof(int))) != expect_sigid[prefix_ind]) {
+                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
+                                          "%s: Expected signal ID [%.8X][%.8X], received [%.8X][%.8X]",
+                                          test_id, prefix_ids[prefix_ind], expect_sigid[prefix_ind],
+                                          *((int*) signal->payload->data),
+                                          *((int*) (signal->payload->data + sizeof(int))));
 
-            exit(1);
-        }
+                    exit(1);
+                }
 
-        // Payload good. Increase next expected signal ID for the
-        // given prefix
-        expect_sigid[prefix_ind]++;
+                // Payload good. Increase next expected signal ID for the
+                // given prefix
+                expect_sigid[prefix_ind]++;
+        };
+
+        assert(sub->queue().dequeue_signal<void*>(sub, (void*) 0, cb) == sigfs::Result::ok);
+
     }
 
     return;
@@ -263,11 +284,11 @@ int main(int argc,  char *const* argv)
         Subscriber *sub2{new Subscriber(*g_queue)};
         SIGFS_LOG_DEBUG("START: 1.0");
         assert(g_queue->queue_signal( "SIG000", 7) == sigfs::Result::ok);
-        check_signal("1.0.1", sub1, "SIG000", 7, 0);
+        check_signal(g_queue, "1.0.1", sub1, "SIG000", 7, 0);
         SIGFS_LOG_INFO("PASS: 1.0");
 
         // Have second subscriber read signal
-        check_signal("1.0.2", sub2, "SIG000", 7, 0);
+        check_signal(g_queue, "1.0.2", sub2, "SIG000", 7, 0);
         SIGFS_LOG_INFO("PASS: 1.0");
 
 
@@ -278,8 +299,8 @@ int main(int argc,  char *const* argv)
         assert(g_queue->queue_signal("SIG001", 7) == sigfs::Result::ok);
         assert(g_queue->queue_signal("SIG002", 7) == sigfs::Result::ok);
 
-        check_signal("1.1.1", sub1, "SIG001", 7, 0);
-        check_signal("1.1.2", sub1, "SIG002", 7, 0);
+        check_signal(g_queue, "1.1.1", sub1, "SIG001", 7, 0);
+        check_signal(g_queue, "1.1.2", sub1, "SIG002", 7, 0);
 
         SIGFS_LOG_INFO("PASS: 1.1");
 
@@ -296,9 +317,9 @@ int main(int argc,  char *const* argv)
         // has signals available
         //
         assert(g_queue->signal_available(sub2));
-        check_signal("1.2.1", sub2, "SIG001", 7, 0);
+        check_signal(g_queue, "1.2.1", sub2, "SIG001", 7, 0);
         assert(g_queue->signal_available(sub2));
-        check_signal("1.2.2", sub2, "SIG002", 7, 0);
+        check_signal(g_queue, "1.2.2", sub2, "SIG002", 7, 0);
         assert(!g_queue->signal_available(sub2));
 
 
@@ -312,9 +333,9 @@ int main(int argc,  char *const* argv)
         assert(g_queue->queue_signal("SIG006", 7) == sigfs::Result::ok);
         assert(g_queue->queue_signal("SIG007", 7) == sigfs::Result::ok);
         assert(g_queue->queue_signal("SIG008", 7) == sigfs::Result::ok);
-        check_signal("1.3.1", sub1, "SIG006", 7, 3);
-        check_signal("1.3.2", sub1, "SIG007", 7, 0);
-        check_signal("1.3.3", sub1, "SIG008", 7, 0);
+        check_signal(g_queue, "1.3.1", sub1, "SIG006", 7, 3);
+        check_signal(g_queue, "1.3.2", sub1, "SIG007", 7, 0);
+        check_signal(g_queue, "1.3.3", sub1, "SIG008", 7, 0);
         SIGFS_LOG_INFO("PASS: 1.3");
 
         // TEST 1.4
@@ -331,18 +352,18 @@ int main(int argc,  char *const* argv)
         assert(g_queue->queue_signal("SIG016", 7) == sigfs::Result::ok);
         assert(g_queue->queue_signal("SIG017", 7) == sigfs::Result::ok);
 
-        check_signal("1.4.1", sub1, "SIG015", 7, 6);
-        check_signal("1.4.2", sub1, "SIG016", 7, 0);
-        check_signal("1.4.3", sub1, "SIG017", 7, 0);
+        check_signal(g_queue, "1.4.1", sub1, "SIG015", 7, 6);
+        check_signal(g_queue, "1.4.2", sub1, "SIG016", 7, 0);
+        check_signal(g_queue, "1.4.3", sub1, "SIG017", 7, 0);
         SIGFS_LOG_INFO("PASS: 1.4");
 
         // 1.5
         //  Have second subscriber, who only read one signal, catch up
         //
         SIGFS_LOG_DEBUG("START: 1.5");
-        check_signal("1.5.1", sub2, "SIG015", 7, 12);
-        check_signal("1.5.2", sub2, "SIG016", 7, 0);
-        check_signal("1.5.3", sub2, "SIG017", 7, 0);
+        check_signal(g_queue, "1.5.1", sub2, "SIG015", 7, 12);
+        check_signal(g_queue, "1.5.2", sub2, "SIG016", 7, 0);
+        check_signal(g_queue, "1.5.3", sub2, "SIG017", 7, 0);
         SIGFS_LOG_INFO("PASS: 1.5");
 
         //
@@ -418,7 +439,6 @@ int main(int argc,  char *const* argv)
         Queue* g_queue(new Queue(131072));
         Subscriber* sub1(new Subscriber(*g_queue));
         Subscriber* sub2(new Subscriber(*g_queue));
-        Subscriber* sub3(new Subscriber(*g_queue));
         const int prefixes[]= { 1,2 };
 
         // Create subscriber thread 1
@@ -431,12 +451,6 @@ int main(int argc,  char *const* argv)
         std::thread sub_thr_2 (
             [g_queue, sub2, prefixes]() {
                 check_signal_sequence("2.1.4", sub2, prefixes, 2, 200000);
-            });
-
-        // Create subscriber thread 3
-        std::thread sub_thr_3 (
-            [g_queue, sub3, prefixes]() {
-                check_signal_sequence("2.1.5", sub3, prefixes, 2, 200000);
             });
 
         // Create publisher thread a
@@ -459,7 +473,6 @@ int main(int argc,  char *const* argv)
 
         sub_thr_1.join();
         sub_thr_2.join();
-        sub_thr_3.join();
 
         // Clean up for a clean valgrind run.
         delete sub1;

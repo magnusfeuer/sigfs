@@ -5,8 +5,7 @@
 
 .PHONY: all clean distclean install uninstall 
 
-EXT_HDR=../sigfs.h 
-HDR=${EXT_HDR} ../sigfs_internal.hh ../log.h 
+HDR=../sigfs.hh ../log.h ../queue_impl.hh
 
 
 INCLUDES=-I/usr/local/include
@@ -32,7 +31,7 @@ DESTDIR ?= /usr/local
 export DESTDIR
 
 
-debug: CXXFLAGS ?=-DSIGFS_LOG -ggdb ${INCLUDES} -std=c++17 -Wall -pthread 
+debug: CXXFLAGS ?=-DSIGFS_LOG -ggdb ${INCLUDES} -std=c++17 -Wall -pthread -pg
 CXXFLAGS ?=-O3 ${INCLUDES} -std=c++17 -Wall -pthread 
 
 #

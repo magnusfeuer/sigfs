@@ -11,8 +11,7 @@
 //
 
 #include <getopt.h>
-#include "../sigfs.h"
-#include "../sigfs_internal.hh"
+#include "../sigfs.hh"
 #include "../log.h"
 #include <string>
 #include <iostream>
@@ -27,6 +26,10 @@
 #include <cassert>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <thread>
+#include "../queue_impl.hh"
+
+int queue_length{131072};
 
 void usage(const char* name)
 {
@@ -76,74 +79,81 @@ void publish_signal_sequence(sigfs::Queue* queue, const int publish_id, int coun
 // <prefix_id (4 bytes)><sequence_id (4 bytes)>
 
 //
-void check_signal_sequence(sigfs::Subscriber* sub,
+void check_signal_sequence(sigfs::Queue* queue,
+                           sigfs::Subscriber* sub,
                            const int* prefix_ids,
                            int prefix_count,
                            int count)
 {
     int expect_sigid[prefix_count] = {};
-    char payload[256];
-    size_t res{0};
-    sigfs::Queue::index_t lost_signals{0};
-    int prefix_ind = 0;
+    int ind = 0;
 
-
-    for (int ind = 0; ind < count; ++ind) {
-        assert(sub->queue().next_signal(sub, payload, sizeof(payload), res, lost_signals) == sigfs::Result::ok);
-
-        // Did we lose signals?
-        if (lost_signals > 0) {
-            printf("Lost %d signals after processing %d signals. Maybe increase --queue-length=<queue-length>?\n",lost_signals, ind);
-            exit(0);
-        }
-
-        // Find correct prefix
-        for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                                  "Checking payload first four bytes [%.8X] bytes against prefix [%.8X]",
-                                  *((int*)payload),
-                                  prefix_ids[prefix_ind]);
-
-            if (*((int*)payload) == prefix_ids[prefix_ind])
-                break;
-        }
-
-        // Did we not recognize prefix?
-        if (prefix_ind == prefix_count) {
-            SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                  "No prefix matched first four payload bytes [%.8X]",
-                                  *((int*) payload));
-
-            SIGFS_LOG_INDEX_FATAL(sub->sub_id(),  "Available prefixes are:");
-
-            for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                      "   [%.8X]",
-                                      prefix_ids[prefix_ind]);
+    sigfs::signal_callback_t<void*> cb =
+        [&expect_sigid, sub, ind, prefix_count, queue, prefix_ids](void* userdata, const sigfs::signal_t* signal) {
+            // Did we lose signals?
+            if (signal->lost_signals > 0) {
+                printf("Lost %d signals after processing %d signals. Maybe increase with --queue-length=%d\n", signal->lost_signals, ind, ((queue_length << 1) | 1) - 1);
+                exit(0);
             }
-            exit(1);
-        }
 
-        SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                              "Comparing expected signal ID [%.8X][%.8X] with received [%.8X][%.8X]",
-                              prefix_ids[prefix_ind], expect_sigid[prefix_ind],
-                              *((int*) payload),
-                              *((int*) (payload + sizeof(int))));
+            int prefix_ind = 0;
 
-        // Check that the rest of the signal payload after prefix matches expectations.
-        if (*((int*) (payload + sizeof(int))) != expect_sigid[prefix_ind]) {
-            SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                  "Expected signal ID [%.8X][%.8X], received [%.8X][%.8X]",
+            // Find correct prefix
+            for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
+                SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
+                                      "Checking payload first four bytes [%.8X] bytes against prefix [%.8X]",
+                                      *((int*)signal->payload->data),
+                                      prefix_ids[prefix_ind]);
+
+                if (*((int*)signal->payload->data) == prefix_ids[prefix_ind])
+                    break;
+            }
+
+            // Did we not recognize prefix?
+            if (prefix_ind == prefix_count) {
+                SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
+                                      "No prefix matched first four payload bytes [%.8X]",
+                                      *((int*) signal->payload->data));
+
+                SIGFS_LOG_INDEX_FATAL(sub->sub_id(),  "Available prefixes are:");
+
+                for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
+                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
+                                          "   [%.8X]",
+                                          prefix_ids[prefix_ind]);
+                }
+                exit(1);
+            }
+
+            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
+                                  "Comparing expected signal ID [%.8X][%.8X] with received [%.8X][%.8X]",
                                   prefix_ids[prefix_ind], expect_sigid[prefix_ind],
-                                  *((int*) payload),
-                                  *((int*) (payload + sizeof(int))));
+                                  *((int*) signal->payload->data),
+                                  *((int*) (signal->payload->data + sizeof(int))));
 
-            exit(1);
-        }
+            // Check that the rest of the signal payload after prefix matches expectations.
+            if (*((int*) (signal->payload->data + sizeof(int))) != expect_sigid[prefix_ind]) {
+                SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
+                                      "Expected signal ID [%.8X][%.8X], received [%.8X][%.8X]",
+                                      prefix_ids[prefix_ind], expect_sigid[prefix_ind],
+                                      *((int*) signal->payload->data),
+                                      *((int*) (signal->payload->data + sizeof(int))));
 
-        // Payload good. Increase next expected signal ID for the
-        // given prefix
-        expect_sigid[prefix_ind]++;
+                exit(1);
+            }
+
+            // Payload good. Increase next expected signal ID for the
+            // given prefix
+            expect_sigid[prefix_ind]++;
+
+        };
+
+    for (ind = 0; ind < count; ++ind) {
+
+
+        assert(queue->dequeue_signal<void*>(sub, 0, cb) == sigfs::Result::ok);
+
+
     }
 
     return;
@@ -164,7 +174,6 @@ int main(int argc,  char *const* argv)
     int signal_count{1000000};
     int nr_publishers{1};
     int nr_subscribers{1};
-    int queue_length{131072};
 
     // loop over all of the options
     while ((ch = getopt_long(argc, argv, "p:s:c:q:", long_options, NULL)) != -1) {
@@ -226,7 +235,7 @@ int main(int argc,  char *const* argv)
     //
     for (int i=0; i < nr_subscribers; ++i) {
         subs[i] = new Subscriber(*g_queue);
-        sub_thr[i] = new std::thread(check_signal_sequence, subs[i], (int*) prefix_ids, nr_publishers, signal_count * nr_publishers);
+        sub_thr[i] = new std::thread(check_signal_sequence, g_queue, subs[i], (int*) prefix_ids, nr_publishers, signal_count * nr_publishers);
     }
 
     //

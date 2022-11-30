@@ -8,10 +8,9 @@
 
 // Need this in order not to trigger an error in fuse_common.h
 
-#define _FILE_OFFSET_BITS 64
-#define FUSE_USE_VERSION 30
+#define FUSE_USE_VERSION 32
 
-#include <fuse.h>
+#include <fuse3/fuse_lowlevel.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -21,10 +20,11 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include "sigfs.h"
-#include "sigfs_internal.hh"
+#include "sigfs.hh"
+
 #include "log.h"
 
+#include "queue_impl.hh"
 using namespace sigfs;
 
 Queue* g_queue(0);
@@ -68,369 +68,320 @@ static void print_file_info(const char* prefix, struct fuse_file_info* fi)
     SIGFS_LOG_DEBUG(res);
 }
 
-static void *do_init(struct fuse_conn_info *conn)
+static void do_init(void* userdata, struct fuse_conn_info* conn)
 {
+    (void) userdata;
+    (void) conn;
+
     SIGFS_LOG_DEBUG("INIT");
 
-    return (void*) 0;
+    return;
 }
 
-static void do_destroy(void* arg)
+static void do_destroy(void* userdata)
 {
-    (void) arg;
+    (void) userdata;
     SIGFS_LOG_DEBUG("do_destroy(): Called");
 }
 
 
-static int do_getattr( const char *path, struct stat *st )
+static void do_getattr(fuse_req_t req, fuse_ino_t ino,
+                       struct fuse_file_info *fi)
 {
-    SIGFS_LOG_DEBUG( "do_getattr(%s): Called" , path);
 
-    st->st_uid = getuid();
-    st->st_gid = getgid();
-    st->st_atime = time(0);
-    st->st_mtime = time(0);
+    SIGFS_LOG_DEBUG( "do_getattr(%lu): Called" , ino);
+    struct stat st{}; // Init to default values (== 0)
+    Subscriber* sub((Subscriber*) fi->fh);
 
-    if ( strcmp( path, "/" ) == 0 )    {
-        st->st_nlink = 2;
-        st->st_mode = S_IFDIR | 0755;
-        SIGFS_LOG_DEBUG("do_getattr(): Return root directory");
-        return 0;
-    }
-    if ( strcmp( path, "/signal" ) == 0) {
+    st.st_ino = ino;
+    st.st_uid = getuid();
+    st.st_gid = getgid();
+    st.st_atime = time(0);
+    st.st_mtime = time(0);
 
-        st->st_mode = S_IFREG | 0644;
-        st->st_nlink = 1;
-        st->st_size = 1024;
-        SIGFS_LOG_DEBUG("do_getattr(): Return /signal entry");
-        return 0;
-    }
+    switch (ino) {
+    case 1: // ROot inode "/"
+        st.st_mode = S_IFDIR | 0755;
+        st.st_nlink = 2;
+        fuse_reply_attr(req, &st, 1.0); // No idea about a good timeout value
+        break;
 
-    SIGFS_LOG_DEBUG("do_getattr(): Path [%s] not supported. Return ENOENT", path);
-    return -ENOENT;
-}
+    case 2: // Signal inode "/signal"
+        st.st_mode = S_IFREG | 0444;
+        st.st_nlink = 1;
+        st.st_size = sub->queue().queue_length();
+        break;
 
-static int do_readdir( const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi )
-{
-    SIGFS_LOG_DEBUG( "do_readdir(%s): Called", path );
-    filler( buffer, ".", NULL, 0 ); // Current Directory
-    filler( buffer, "..", NULL, 0 ); // Parent Directory
-
-    if ( strcmp( path, "/" ) == 0 ) // If the user is trying to show the files/directories of the root directory show the following
-    {
-        filler( buffer, "signal", NULL, 0 );
-
-        SIGFS_LOG_DEBUG("do_readdir(): Returning root entry \"signal\".");
-        return 0;
+    default:
+        fuse_reply_err(req, ENOENT);
+        return;
     }
 
-    SIGFS_LOG_DEBUG("do_readdir(): Path [%s] not supported. Return ENOENT", path);
-    return -ENOENT;
+
+    fuse_reply_attr(req, &st, 1.0); // No idea about a good timeout value
+
+    SIGFS_LOG_DEBUG("do_getattr(): Inode [%lu] not supported. Return ENOENT", ino);
+    return;
+}
+
+//
+// Stolen from libfuse/examples/hello_ll.c
+//
+struct dirbuf {
+	char *p;
+	size_t size;
+};
+
+static void dirbuf_add(fuse_req_t req, struct dirbuf *b, const char *name,
+		       fuse_ino_t ino)
+{
+	struct stat stbuf;
+	size_t oldsize = b->size;
+	b->size += fuse_add_direntry(req, NULL, 0, name, NULL, 0);
+	b->p = (char *) realloc(b->p, b->size);
+	memset(&stbuf, 0, sizeof(stbuf));
+	stbuf.st_ino = ino;
+	fuse_add_direntry(req, b->p + oldsize, b->size - oldsize, name, &stbuf,
+			  b->size);
+}
+
+#define min(x, y) ((x) < (y) ? (x) : (y))
+
+static int reply_buf_limited(fuse_req_t req, const char *buf, size_t bufsize,
+			     off_t off, size_t maxsize)
+{
+    if ((size_t) off < bufsize)
+        return fuse_reply_buf(req, buf + off,
+                              min(bufsize - off, maxsize));
+    else
+        return fuse_reply_buf(req, NULL, 0);
+}
+
+static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
+                      off_t off, struct fuse_file_info *fi)
+{
+    (void) fi;
+    if (ino != 1) {
+        fuse_reply_err(req, ENOTDIR);
+        return;
+    }
+    struct dirbuf b;
+
+    memset(&b, 0, sizeof(b));
+    dirbuf_add(req, &b, ".", 1);
+    dirbuf_add(req, &b, "..", 1);
+    dirbuf_add(req, &b, "signal", 2);
+    reply_buf_limited(req, b.p, b.size, off, size);
+    SIGFS_LOG_DEBUG("do_readdir(): Returning root entry \"signal\".");
+
+    free(b.p);
+    return;
 }
 
 
-static int do_create(const char *path, mode_t mode, struct fuse_file_info *fi)
-{
-    SIGFS_LOG_DEBUG("do_create(%s): Called", path);
-    SIGFS_LOG_DEBUG("do_create():  mode[%.8X]:\n", mode);
-    print_file_info("do_create(): ", fi);
-    Subscriber *sub = new Subscriber(*g_queue);
 
-    // It works. Stop whining.
-    fi->fh = (uint64_t) sub;
-    fi->direct_io=1;
-    fi->nonseekable=1;
-    return 0;
-}
-
-static int do_open(const char *path, struct fuse_file_info *fi)
+static void do_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
-    SIGFS_LOG_DEBUG("do_open(%s): Called", path);
+    SIGFS_LOG_DEBUG("do_open(%lu): Called", ino );
     print_file_info("do_open():", fi);
-
-    if (strcmp(path, "/signal")) {
-
-        SIGFS_LOG_DEBUG("do_open(): Path [%s] not supported. Return ENOENT", path);
-        return -ENOENT;
+    if (ino != 2) {
+        fuse_reply_err(req, EISDIR);
+        return;
     }
-    print_file_info("do_open():", fi);
 
+    if ((fi->flags & O_ACCMODE) != O_RDONLY) {
+        fuse_reply_err(req, EACCES);
+        return;
+    }
 
-    // Setup a new subscriber.
-    // Since we will mess around with type casting here, we will use
-    // dumb pointers.
-    //
-
-    Subscriber *sub = new Subscriber(*g_queue);
-
+    Subscriber *sub = new Subscriber(*g_queue, (bool (*)(void)) fuse_req_interrupted);
     fi->fh = (uint64_t) sub; // It works. Stop whining.
-
-
     fi->direct_io=1;
     fi->nonseekable=1;
+    fuse_reply_open(req, fi);
 
     SIGFS_LOG_DEBUG("do_open(): Returning ok");
-    return 0;
-}
-
-static int do_readlink (const char* path, char* buf , size_t size)
-{
-    SIGFS_LOG_DEBUG("do_readlink(): Returning EPERM");
-    errno = EPERM;
-    return -1;
-}
-
-static int do_getdir (const char* path, fuse_dirh_t dirh, fuse_dirfil_t dirfil)
-{
-    SIGFS_LOG_DEBUG("do_getdir(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_mknod (const char* path, mode_t mode, dev_t dev)
-{
-    SIGFS_LOG_DEBUG("do_mknod(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_mkdir (const char* path, mode_t mode)
-{
-    SIGFS_LOG_DEBUG("do_mkdir(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_unlink (const char* path)
-{
-    SIGFS_LOG_DEBUG("do_unlink(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_rmdir (const char* path )
-{
-    SIGFS_LOG_DEBUG("do_rmdir(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_symlink (const char* oldpath, const char* newpath )
-{
-    SIGFS_LOG_DEBUG("do_symlink(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_rename (const char* oldpath, const char* newpath )
-{
-    SIGFS_LOG_DEBUG("do_rename(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_link (const char* oldpath, const char* newpath )
-{
-    SIGFS_LOG_DEBUG("do_link(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_chmod (const char* path, mode_t mode)
-{
-    SIGFS_LOG_DEBUG("do_chmod(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_chown (const char* path, uid_t uid, gid_t id)
-{
-    SIGFS_LOG_DEBUG("do_chown(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_truncate (const char* path, off_t off)
-{
-    SIGFS_LOG_DEBUG("do_truncate(): Returning EPERM");
-    errno = 0;
-    return 0;
-}
-
-static int do_utime (const char* path, struct utimbuf* utime)
-{
-    SIGFS_LOG_DEBUG("do_utime(): Returning EPERM");
-    return -EPERM;
-}
-
-
-static int do_statfs (const char* path, struct statvfs* stat)
-{
-    SIGFS_LOG_DEBUG("do_statfs(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_flush (const char* path, struct fuse_file_info* fi)
-{
-#ifdef SIGFS_LOG
-    Subscriber* sub((Subscriber*) fi->fh);
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_flush(): Returning ok");
-#endif
-    errno = 0;
-    return 0;
-}
-
-static int do_release (const char* path, struct fuse_file_info* fi)
-{
-    Subscriber* sub((Subscriber*) fi->fh);
-    delete sub;
-    errno = 0;
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_release(): Returning ok");
-    return 0;
-}
-
-static int do_fsync (const char* path, int wtf, struct fuse_file_info* fi)
-{
-#ifdef SIGFS_LOG
-    Subscriber* sub((Subscriber*) fi->fh);
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_fsync(): Returning EPERM");
-#endif
-    return -EPERM;
-}
-
-static int do_setxattr (const char* path, const char* name, const char* value, size_t size, int flags)
-{
-
-    SIGFS_LOG_DEBUG("do_setxattr(): Returning EPERM");
-    return -EPERM;
-}
-
-static int do_getxattr (const char* path, const char* name, char* value, size_t size)
-{
-    SIGFS_LOG_DEBUG("do_getxattr(): Returning ok");
-    memset(value, 0, size);
-    errno = 0;
-    return 0;
-}
-
-static int do_listxattr (const char* path, char* list, size_t size)
-{
-    SIGFS_LOG_DEBUG("do_listxattr(): Returning EPERM");
-    return -EPERM;
+    return;
 }
 
 
 
-static int do_read(const char *path,
-                   char *buffer,
-                   size_t size,
-                   off_t offset,
-                   struct fuse_file_info *fi )
+static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
+                    off_t offset, struct fuse_file_info *fi)
 {
     // It works. Stop whining.
-    Subscriber* sub((Subscriber*) fi->fh);
-    size_t returned_size(0);
-    uint32_t lost_signals(0);
-    sigfs_signal_t* sig((sigfs_signal_t*) buffer);
+    Subscriber* sub{(Subscriber*) fi->fh};
 
 
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(%s): Called", path);
-    if (offset != 0) {
-        SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Offset %lu ignored.", offset);
-//        exit(1);
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(lu): Called", ino);
+
+    if (ino != 2) {
+        SIGFS_LOG_INDEX_WARNING(sub->sub_id(),"do_read(%lu): Only inode 2 can be read from", ino);
+        fuse_reply_err(req, EPERM);
+        return;
     }
 
-
-
-// #warning How do we handle multiple reads to retrieve a single signal?
-    g_queue->next_signal(sub,
-                         sig->data,
-                         size - sizeof(sigfs_signal_t) ,
-                         returned_size,
-                         lost_signals);
-
-    sig->lost_signals = lost_signals;
-    sig->data_size = returned_size;
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Returning %d bytes", returned_size + sizeof(sigfs_signal_t));
-    errno = 0;
-    return returned_size + sizeof(sigfs_signal_t);
-}
-
-
-static int do_write( const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi )
-{
-    sigfs_signal_t* sig((sigfs_signal_t*) buffer);
-#ifdef SIGFS_LOG
-    Subscriber* sub((Subscriber*) fi->fh);
-#endif
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(%s): Called", path);
-
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  offset:            %lu", offset );
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  size:              %lu", size );
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  sig->lost_signals: %u",  sig->lost_signals);
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  sig->data_size:    %u",  sig->data_size);
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  sig->buffer:       [%-*s]",  (int) size, sig->data );
-
-
     if (offset != 0) {
-        SIGFS_LOG_DEBUG("do_write(): Offset %lu ignored", offset);
-    }
-
-    // Need at least struct plus one byte of data.
-    if (size < sizeof(sigfs_signal_t) + 1) {
-        SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),"WRITE -> Need at least %lu bytes, but buffer is only %lu",
-                              sizeof(sigfs_signal_t) + 1, size);
+        SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "do_read(): Offset %lu not implemented.", offset);
         exit(1);
     }
 
-    g_queue->queue_signal(sig->data, sig->data_size);
+    signal_callback_t<fuse_req_t> cb =
+        [sub](fuse_req_t userdata, const signal_t* signal) {
+            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Sending back %lu bytes", sizeof(signal_t) + signal->payload->data_size);
+            return fuse_reply_buf(userdata, (char*) signal, sizeof(signal_t) + signal->payload->data_size);
+        };
 
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(): Returning %d bytes", sig->data_size + sizeof(sigfs_signal_t));
-    return sig->data_size + sizeof(sigfs_signal_t);
+    g_queue->dequeue_signal<fuse_req_t>(sub, req, cb);
+    return;
+}
+
+
+static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
+                     size_t size, off_t offset, struct fuse_file_info *fi)
+{
+#ifdef SIGFS_LOG
+    Subscriber* sub((Subscriber*) fi->fh);
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(%lu): Called", ino);
+
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  inode:     %lu", ino );
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  offset:    %lu", offset );
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  size:      %lu", size );
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  data:      [%-*s]",  (int) size, buffer);
+#endif
+
+    if (ino != 2) {
+        SIGFS_LOG_INDEX_WARNING(sub->sub_id(),"do_write(%lu): Only inode 2 can be written to", ino);
+        fuse_reply_err(req, EPERM);
+        return;
+    }
+
+    if (offset != 0) {
+        SIGFS_LOG_INDEX_FATAL(sub->sub_id(),"do_write(%lu): offset is %lu. Needs to be 0", ino,offset);
+        exit(1);
+    }
+
+    g_queue->queue_signal(buffer, size);
+    fuse_reply_write(req, size);
+
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(%lu): Processed %d bytes", ino, size);
 }
 
 
 
+// Nil functions that we don't want to pollute the source file with
+//#include "sigfs_inc.cc"
 
 int main( int argc, char *argv[] )
 {
-    static struct fuse_operations operations = {
+    static struct fuse_lowlevel_ops operations = {
+/*
+          .readlink    = do_readlink,
+          .mknod       = do_mknod,
+          .mkdir       = do_mkdir,
+          .unlink      = do_unlink,
+          .rmdir       = do_rmdir,
+          .symlink     = do_symlink,
+          .rename      = do_rename,
+          .link        = do_link,
+          .chmod       = do_chmod,
+          .chown       = do_chown,
+          .truncate    = do_truncate,
+          .utime       = do_utime,
+          .statfs      = do_statfs,
+          .flush       = do_flush,
+          .release     = do_release,
+          .fsync       = do_fsync,
+          .setxattr    = do_setxattr,
+          .getxattr    = do_getxattr,
+          .listxattr   = do_listxattr,
+          .create	     = 0,
+          .releasedir  = 0,
+          .fsyncdir    = 0,
+          .access      = 0,
+          .opendir     = 0,
+          .ftruncate   = 0,
+          .fgetattr    = 0,
+          .lock        = 0,
+          .utimens     = 0,
+          .bmap        = 0,
+          .ioctl       = 0,
+          .poll        = 0,
+          .write_buf   = 0,
+          .read_buf    = 0,
+          .flock       = 0,
+          .fallocate   = 0, */
+
+        .init        = do_init,
+        .destroy     = do_destroy,
         .getattr     = do_getattr,
-        .readlink    = do_readlink,
-        .getdir      = do_getdir,
-        .mknod       = do_mknod,
-        .mkdir       = do_mkdir,
-        .unlink      = do_unlink,
-        .rmdir       = do_rmdir,
-        .symlink     = do_symlink,
-        .rename      = do_rename,
-        .link        = do_link,
-        .chmod       = do_chmod,
-        .chown       = do_chown,
-        .truncate    = do_truncate,
-        .utime       = do_utime,
         .open	     = do_open,
         .read	     = do_read,
         .write	     = do_write,
-        .statfs      = do_statfs,
-        .flush       = do_flush,
-        .release     = do_release,
-        .fsync       = do_fsync,
-        .setxattr    = do_setxattr,
-        .getxattr    = do_getxattr,
-        .listxattr   = do_listxattr,
-        .opendir     = 0,
         .readdir     = do_readdir,
-        .releasedir  = 0,
-        .fsyncdir    = 0,
-        .init        = do_init,
-        .destroy     = do_destroy,
-        .access      = 0,
-        .create	     = do_create,
-        .ftruncate   = 0,
-        .fgetattr    = 0,
-        .lock        = 0,
-        .utimens     = 0,
-        .bmap        = 0,
-        .ioctl       = 0,
-        .poll        = 0,
-        .write_buf   = 0,
-        .read_buf    = 0,
-        .flock       = 0,
-        .fallocate   = 0,
     };
 
 
+    struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+    struct fuse_session *se;
+    struct fuse_cmdline_opts opts;
+    struct fuse_loop_config config;
+    int ret = -1;
+
     g_queue = new Queue(8);
-    return fuse_main( argc, argv, &operations, NULL );
+
+    if (fuse_parse_cmdline(&args, &opts) != 0)
+        return 1;
+    if (opts.show_help) {
+        printf("usage: %s [options] <mountpoint>\n\n", argv[0]);
+        fuse_cmdline_help();
+        fuse_lowlevel_help();
+        ret = 0;
+        goto err_out1;
+    } else if (opts.show_version) {
+        printf("FUSE library version %s\n", fuse_pkgversion());
+        fuse_lowlevel_version();
+        ret = 0;
+        goto err_out1;
+    }
+
+    if(opts.mountpoint == NULL) {
+        printf("usage: %s [options] <mountpoint>\n", argv[0]);
+        printf("       %s --help\n", argv[0]);
+        ret = 1;
+        goto err_out1;
+    }
+
+    se = fuse_session_new(&args, &operations,
+                          sizeof(operations), NULL);
+    if (se == NULL)
+        goto err_out1;
+
+    if (fuse_set_signal_handlers(se) != 0)
+        goto err_out2;
+
+    if (fuse_session_mount(se, opts.mountpoint) != 0)
+        goto err_out3;
+
+    fuse_daemonize(opts.foreground);
+
+    /* Block until ctrl+c or fusermount -u */
+    if (opts.singlethread)
+        ret = fuse_session_loop(se);
+    else {
+        config.clone_fd = opts.clone_fd;
+        config.max_idle_threads = opts.max_idle_threads;
+        ret = fuse_session_loop_mt(se, &config);
+    }
+
+    fuse_session_unmount(se);
+err_out3:
+    fuse_remove_signal_handlers(se);
+err_out2:
+    fuse_session_destroy(se);
+err_out1:
+    free(opts.mountpoint);
+    fuse_opt_free_args(&args);
+
+    return ret ? 1 : 0;
 }

@@ -11,9 +11,8 @@
 // Thread safe circular queue with loss detection
 //
 
-#include "sigfs_internal.hh"
+#include "sigfs.hh"
 #include "log.h"
-
 using namespace sigfs;
 
 Queue::Queue(const std::uint32_t queue_size):
@@ -62,7 +61,7 @@ void Queue::dump(const char* prefix, const Subscriber* sub)
         if (strlen(suffix) == 4)
             suffix[0] = 0;
 
-        SIGFS_LOG_DEBUG("%s: [%d] SigID[%lu] [%-*s]%s ", prefix, ind, queue_[ind].sig_id(), queue_[ind].data_size(), queue_[ind].data(), suffix);
+        SIGFS_LOG_DEBUG("%s: [%d] SigID[%lu] [%-*s]%s ", prefix, ind, queue_[ind].sig_id(), queue_[ind].signal()->data_size, queue_[ind].signal()->data, suffix);
         ++ind;
     }
 #endif
@@ -87,7 +86,6 @@ Result Queue::queue_signal(const char* data, const size_t data_size)
         std::unique_lock prio_lock(prio_mutex_);
         SIGFS_LOG_DEBUG("queue_signal(): Prio lock acquired. ");
 
-        // STUCK HERE
         prio_cond_.wait(prio_lock, [&self]
                                    {
                                        //
@@ -126,148 +124,14 @@ Result Queue::queue_signal(const char* data, const size_t data_size)
         // Nil Sig ID for clarity. No functionality is associated with this.
         queue_[head_].set_sig_id(0);
 
+        // Notify other queue_signal() callers waiting on conditional lock above
+        cond_.notify_one();
     }
-
-    // Notify other queue_signal() callers waiting on conditional lock above
-    cond_.notify_one();
 
     return Result::ok;
 }
 
 
-const Result Queue::next_signal(Subscriber* sub,
-                                char*  data,
-                                const size_t data_size,
-                                size_t& returned_size,
-                                index_t &lost_signal_count) const
-{
-
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "next_signal(): Called", sub->sig_id());
-
-    // Have we lost signals?
-    // We have the sig_id of currently stored signal in queue[index(sub->sig_id())].sig_id()
-    // We have the ID of the next signal to process is in sub->sig_id()
-    // If the current id < next id then we are waiting for a new signal to fill the slot
-    // If the current id == next_id, then the signal is ready to read
-    // If the current id > next_id then we have lost signals.
-    //
-    lost_signal_count = 0;
-
-/*
-    {
-        std::unique_lock prio_lock(prio_mutex_);
-        SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "next_signal(): Prio lock acquired", sub->sig_id());
-        active_subscribers_++;
-    }
-*/
-    //
-    // Wait for a signal to become ready.
-    //
-    {
-        std::unique_lock lock(mutex_);
-        SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "next_signal(): Lock acquired", sub->sig_id());
-
-        const Queue& self(*this);
-
-        // STUCK HERE
-        cond_.wait(lock, [&self, &sub] {
-                             SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                                                   "next_signal(): head(%lu) %s tail(%lu) --- self.queue_[self.index(sub->sig_id(%u))].sig_id(%lu) - sub->sig_id(%lu) = %ld",
-                                                   self.head(),
-                                                   ((self.head() == self.tail())?"==":"!="),
-                                                   self.tail(),
-                                                   sub->sig_id(),
-                                                   self.queue_[self.index(sub->sig_id())].sig_id(),
-                                                   sub->sig_id(),
-                                                   (self.queue_[self.index(sub->sig_id())].sig_id() - sub->sig_id()));
-
-                             //
-                             // If current id < next id, then we are still waiting for
-                             // a new signal to arrive. Continue waiting
-                             //
-                             if (self.head() == self.tail() || self.queue_[self.index(sub->sig_id())].sig_id() < sub->sig_id()) {
-                                 return false;
-                             }
-
-                             // We either have:
-                             // current id == next_id (Signal ready)
-                             //   or
-                             // current_id > next_id (Signals lost)
-                             //
-                             // In either case, exit conditional wait.
-                             //
-                             SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "next_signal(): Active subscribers increased", sub->sig_id());
-                             return true;
-                         });
-
-        SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "next_signal(): Conditional wait exit on signal ID %lu", sub->sig_id());
-
-        //
-        // If the ID of the oldest signal in the queue (tail()) is
-        // greater than the next signal we expect to read (sub->sig_id()), then
-        // we have lost signals
-        //
-        // Update subscriber's sig_id to the oldest signal in the queue.
-        //
-        if (self.queue_[tail()].sig_id() > sub->sig_id()) {
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                                  "next_signal(): Tail catchup for [%lu] lost signals [%lu]->[%lu]",
-                                  queue_[tail()].sig_id() - sub->sig_id(),
-                                  sub->sig_id(),
-                                  queue_[tail()].sig_id());
-            //
-            // sub->sig_id() is for the next signal we are expecting.
-            // queue_[tail()].sig_id() is the signal currently stored in the queue slot
-            // we are about to read the signal from.
-            //
-            lost_signal_count = self.queue_[tail()].sig_id() - sub->sig_id();
-            sub->set_sig_id(tail_sig_id_());
-        }
-
-        //
-        // We are now ready to read out the signal stored by sub->sig_id()
-        //
-
-        //
-        // Do we have enough storage to copy out signal data?
-        //
-        if (queue_[index(sub->sig_id())].data_size() > data_size) {
-            SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                  "next_signal(): Signal %lu too large for provided byffer. Needed %lu bytes. Have %lu",
-                                  sub->sig_id(),
-                                  queue_[index(sub->sig_id())].data_size(),
-                                  data_size);
-            exit(255);
-        }
-
-        returned_size = queue_[index(sub->sig_id())].data_size();
-
-        memcpy(data, queue_[index(sub->sig_id())].data(), returned_size);
-
-        // Bump signal id in preparation for the next signal.
-        sub->set_sig_id(sub->sig_id() + 1);
-        SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "next_signal(): %d bytes copied. Done", returned_size);
-
-        //
-        // Decrease active subscribers and check if there are no other subscribers waiting.
-        // If that is the case, signal all threads waiting in queue_signal() that they
-        // may proceed.
-        //
-    }
-/*
-    {
-        std::unique_lock prio_lock(prio_mutex_);
-        active_subscribers_--;
-
-        // No more active subscribers.
-        // Ping any queue_signal() callers to get them going
-        if (!active_subscribers_) {
-            prio_cond_.notify_one();
-        }
-    }
-*/
-    return Result::ok;
-}
 
 
 const bool Queue::signal_available(const Subscriber* sub) const

@@ -11,7 +11,7 @@
 //
 
 #include <getopt.h>
-#include "sigfs.h"
+#include "sigfs.hh"
 #include <string>
 #include <iostream>
 #include <memory.h>
@@ -74,8 +74,8 @@ int main(int argc,  char *const* argv)
         exit(255);
     }
 
-    char buf[sizeof(sigfs_signal_t) + 10240];
-    sigfs_signal_t *sig((sigfs_signal_t*) buf);
+    char buf[sizeof(sigfs::signal_t) + 10240];
+    sigfs::signal_t *sig((sigfs::signal_t*) buf);
     int ind = 0;
     if (count)
         std::cout << "Reading " << count << " signals. Ctrl-c to abort" << std::endl;
@@ -92,8 +92,8 @@ int main(int argc,  char *const* argv)
         printf("Signal %d\n", ind);
         printf("  size:              %lu\n", read_res );
         printf("  sig->lost_signals: %u\n",  sig->lost_signals);
-        printf("  sig->data_size:    %u\n",  sig->data_size);
-        printf("  sig->buffer:       [%-*s]\n\n",  (int) sig->data_size, sig->data );
+        printf("  sig->data_size:    %u\n",  sig->payload->data_size);
+        printf("  sig->buffer:       [%-*s]\n\n",  (int) sig->payload->data_size, sig->payload->data );
         ind++;
     }
 
