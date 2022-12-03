@@ -68,6 +68,7 @@ static void print_file_info(const char* prefix, struct fuse_file_info* fi)
     SIGFS_LOG_DEBUG(res);
 }
 
+
 static void do_init(void* userdata, struct fuse_conn_info* conn)
 {
     (void) userdata;
@@ -78,20 +79,40 @@ static void do_init(void* userdata, struct fuse_conn_info* conn)
     return;
 }
 
+
 static void do_destroy(void* userdata)
 {
     (void) userdata;
     SIGFS_LOG_DEBUG("do_destroy(): Called");
 }
 
+static void do_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
+{
+	struct fuse_entry_param e;
+
+        printf("Lookup called: %s\n", name);
+	if (parent != 1 || strcmp(name, "signal") != 0)
+		fuse_reply_err(req, ENOENT);
+	else {
+		memset(&e, 0, sizeof(e));
+		e.ino = 2;
+		e.attr_timeout = 1.0;
+		e.entry_timeout = 1.0;
+                e.attr.st_mode = S_IFREG | 0644;
+                e.attr.st_nlink = 1;
+
+
+		fuse_reply_entry(req, &e);
+	}
+}
 
 static void do_getattr(fuse_req_t req, fuse_ino_t ino,
                        struct fuse_file_info *fi)
 {
-
     SIGFS_LOG_DEBUG( "do_getattr(%lu): Called" , ino);
     struct stat st{}; // Init to default values (== 0)
-    Subscriber* sub((Subscriber*) fi->fh);
+
+    (void) fi;
 
     st.st_ino = ino;
     st.st_uid = getuid();
@@ -103,13 +124,11 @@ static void do_getattr(fuse_req_t req, fuse_ino_t ino,
     case 1: // ROot inode "/"
         st.st_mode = S_IFDIR | 0755;
         st.st_nlink = 2;
-        fuse_reply_attr(req, &st, 1.0); // No idea about a good timeout value
         break;
 
     case 2: // Signal inode "/signal"
-        st.st_mode = S_IFREG | 0444;
+        st.st_mode = S_IFREG | 0644;
         st.st_nlink = 1;
-        st.st_size = sub->queue().queue_length();
         break;
 
     default:
@@ -118,7 +137,9 @@ static void do_getattr(fuse_req_t req, fuse_ino_t ino,
     }
 
 
+    SIGFS_LOG_DEBUG( "do_getattr(%lu): Before" , ino);
     fuse_reply_attr(req, &st, 1.0); // No idea about a good timeout value
+    SIGFS_LOG_DEBUG( "do_getattr(%lu): After" , ino);
 
     SIGFS_LOG_DEBUG("do_getattr(): Inode [%lu] not supported. Return ENOENT", ino);
     return;
@@ -132,8 +153,23 @@ struct dirbuf {
 	size_t size;
 };
 
-static void dirbuf_add(fuse_req_t req, struct dirbuf *b, const char *name,
-		       fuse_ino_t ino)
+
+#define min(x, y) ((x) < (y) ? (x) : (y))
+
+static int reply_buf_limited(fuse_req_t req, const char *buf, size_t bufsize,
+			     off_t off, size_t maxsize)
+{
+    if ((size_t) off < bufsize) {
+        SIGFS_LOG_DEBUG("reply_buf_limited(): LT");
+        return fuse_reply_buf(req, buf + off,
+                              min(bufsize - off, maxsize));
+    }
+
+    SIGFS_LOG_DEBUG("reply_buf_limited(): GTE");
+    return fuse_reply_buf(req, NULL, 0);
+}
+
+static void dirbuf_add(fuse_req_t req, struct dirbuf *b, const char *name, fuse_ino_t ino)
 {
 	struct stat stbuf;
 	size_t oldsize = b->size;
@@ -141,25 +177,13 @@ static void dirbuf_add(fuse_req_t req, struct dirbuf *b, const char *name,
 	b->p = (char *) realloc(b->p, b->size);
 	memset(&stbuf, 0, sizeof(stbuf));
 	stbuf.st_ino = ino;
-	fuse_add_direntry(req, b->p + oldsize, b->size - oldsize, name, &stbuf,
-			  b->size);
-}
-
-#define min(x, y) ((x) < (y) ? (x) : (y))
-
-static int reply_buf_limited(fuse_req_t req, const char *buf, size_t bufsize,
-			     off_t off, size_t maxsize)
-{
-    if ((size_t) off < bufsize)
-        return fuse_reply_buf(req, buf + off,
-                              min(bufsize - off, maxsize));
-    else
-        return fuse_reply_buf(req, NULL, 0);
+	fuse_add_direntry(req, b->p + oldsize, b->size - oldsize, name, &stbuf, b->size);
 }
 
 static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
                       off_t off, struct fuse_file_info *fi)
 {
+    SIGFS_LOG_DEBUG("do_readdir(): Called.");
     (void) fi;
     if (ino != 1) {
         fuse_reply_err(req, ENOTDIR);
@@ -268,6 +292,11 @@ static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
 }
 
 
+static void dummy_log(fuse_log_level level, const char *fmt, va_list ap)
+{
+    (void) level;
+}
+
 
 // Nil functions that we don't want to pollute the source file with
 //#include "sigfs_inc.cc"
@@ -314,6 +343,7 @@ int main( int argc, char *argv[] )
 
         .init        = do_init,
         .destroy     = do_destroy,
+        .lookup      = do_lookup,
         .getattr     = do_getattr,
         .open	     = do_open,
         .read	     = do_read,
@@ -352,8 +382,8 @@ int main( int argc, char *argv[] )
         goto err_out1;
     }
 
-    se = fuse_session_new(&args, &operations,
-                          sizeof(operations), NULL);
+    fuse_set_log_func(dummy_log);
+    se = fuse_session_new(&args, &operations, sizeof(operations), NULL);
     if (se == NULL)
         goto err_out1;
 
