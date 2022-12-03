@@ -213,10 +213,10 @@ static void do_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
         return;
     }
 
-    if ((fi->flags & O_ACCMODE) != O_RDONLY) {
-        fuse_reply_err(req, EACCES);
-        return;
-    }
+    // if (!(fi->flags & (O_RDONLY | O_WRONLY))) {
+    //     fuse_reply_err(req, EACCES);
+    //     return;
+    // }
 
     Subscriber *sub = new Subscriber(*g_queue, (bool (*)(void)) fuse_req_interrupted);
     fi->fh = (uint64_t) sub; // It works. Stop whining.
@@ -250,10 +250,29 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
         exit(1);
     }
 
-    signal_callback_t<fuse_req_t> cb =
-        [sub](fuse_req_t userdata, const signal_t* signal) {
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Sending back %lu bytes", sizeof(signal_t) + signal->payload->data_size);
-            return fuse_reply_buf(userdata, (char*) signal, sizeof(signal_t) + signal->payload->data_size);
+    Queue::signal_callback_t<fuse_req_t> cb =
+        [sub](fuse_req_t userdata, signal_id_t signal_id, const char* payload, std::uint32_t payload_size, sigfs::signal_count_t lost_signals) {
+
+            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Sending back %lu bytes", sizeof(signal_t) + payload_size);
+            signal_t sig = {
+                .lost_signals = lost_signals,
+                .signal_id = signal_id,
+                .payload_size = payload_size
+            };
+
+            const struct iovec iov[2] = {
+                {
+                    .iov_base=(void*) &sig,
+                    .iov_len=sizeof(signal_t)
+                },
+                {
+                    .iov_base=(void*) payload,
+                    .iov_len=payload_size
+                }
+            };
+
+            //return fuse_reply_buf(userdata, (char*) signal, sizeof(signal_t) + signal->payload->data_size);
+            return fuse_reply_iov(userdata, iov, 2);
         };
 
     g_queue->dequeue_signal<fuse_req_t>(sub, req, cb);

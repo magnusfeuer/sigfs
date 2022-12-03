@@ -44,20 +44,22 @@ void check_signal(sigfs::Queue* queue, const char* prefix, sigfs::Subscriber* su
 
     memset(buf, 0, sizeof(buf));
 
-    sigfs::signal_callback_t<void*> cb =
-        [queue, prefix, wanted_res, sub, wanted_data, wanted_lost_signals](void* userdata, const sigfs::signal_t* signal) {
-            if ((int) signal->payload->data_size != wanted_res) {
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted %lu bytes. Got %lu bytes", prefix, wanted_res, signal->payload->data_size);
+    sigfs::Queue::signal_callback_t<void*> cb =
+        [queue, prefix, wanted_res, sub, wanted_data, wanted_lost_signals]
+        (void* userdata, sigfs::signal_id_t signal_id, const char* payload, std::uint32_t payload_size, sigfs::signal_count_t lost_signals)
+        {
+            if ((int) payload_size != wanted_res) {
+                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted %lu bytes. Got %lu bytes", prefix, wanted_res, payload_size);
                 queue->dump(prefix, sub);
                 exit(1);
             }
-            if (memcmp(signal->payload->data, wanted_data, signal->payload->data_size)) {
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted data [%-*s]. Got [%-*s]", prefix, wanted_res, wanted_data, (int) signal->payload->data_size, signal->payload->data);
+            if (memcmp(payload, wanted_data, payload_size)) {
+                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted data [%-*s]. Got [%-*s]", prefix, wanted_res, wanted_data, (int) payload_size, payload);
                 queue->dump(prefix, sub);
                 exit(1);
             }
-            if ((int) signal->lost_signals != wanted_lost_signals) {
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted lost signals %lu. Got %lu", prefix, wanted_lost_signals, signal->lost_signals);
+            if ((int) lost_signals != wanted_lost_signals) {
+                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted lost signals %lu. Got %lu", prefix, wanted_lost_signals, lost_signals);
                 queue->dump(prefix, sub);
                 exit(1);
             }
@@ -121,36 +123,42 @@ void check_signal_sequence(const char* test_id,
         // We do the callback since signal is a part of a locked context in queue.cc
         // Once this lambda returns, signal will be undefined.
         //
-        sigfs::signal_callback_t<void*> cb =
-            [test_id, sub, prefix_count, prefix_ids, &expect_sigid](void* x, const sigfs::signal_t* signal) {
+        sigfs::Queue::signal_callback_t<void*> cb =
+            [test_id, sub, prefix_count, prefix_ids, &expect_sigid]
+            (void* x,
+             sigfs::signal_id_t signal_id,
+             const char* payload,
+             std::uint32_t payload_size,
+             sigfs::signal_count_t lost_signals) {
+
                 int prefix_ind{0};
                 (void) x;
 
-                if (signal->payload->data_size != 2*sizeof(int)) {
+                if (payload_size != 2*sizeof(int)) {
                     SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Expected %d bytes, got %d bytes,",
-                                          test_id, 2*sizeof(int), signal->payload->data_size);
+                                          test_id, 2*sizeof(int), payload_size);
                     exit(0);
                 }
 
                 // Did we lose signals?
-                if (signal->lost_signals > 0) {
-                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Lost %d signals,", test_id, signal->lost_signals);
+                if (lost_signals > 0) {
+                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Lost %d signals,", test_id, lost_signals);
                     exit(0);
                 }
 
-                for(std::uint32_t ind = 0; ind < signal->payload->data_size; ++ind) {
+                for(std::uint32_t ind = 0; ind < payload_size; ++ind) {
                     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                                          "%s: Byte %d: %.2X", test_id, ind, (char) signal->payload->data[ind]);
+                                          "%s: Byte %d: %.2X", test_id, ind, (char) payload[ind]);
                 }
                 // Find correct prefix
                 for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
                     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
                                           "%s: Checking payload first four bytes [%.8X] bytes against prefix [%.8X]",
                                           test_id,
-                                          *((int*) signal->payload->data),
+                                          *((int*) payload),
                                           prefix_ids[prefix_ind]);
 
-                    if (*((int*)signal->payload->data) == prefix_ids[prefix_ind])
+                    if (*((int*)payload) == prefix_ids[prefix_ind])
                         break;
                 }
 
@@ -159,7 +167,7 @@ void check_signal_sequence(const char* test_id,
                     SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
                                           "%s: No prefix matched first four payload bytes [%.8X]",
                                           test_id,
-                                          *((int*) signal->payload->data));
+                                          *((int*) payload));
 
                     SIGFS_LOG_INDEX_FATAL(sub->sub_id(),  "%s: Available prefixes are:", test_id);
 
@@ -175,16 +183,16 @@ void check_signal_sequence(const char* test_id,
                                       "%s: Comparing expected signal ID [%.8X][%.8X] with received [%.8X][%.8X]",
                                       test_id,
                                       prefix_ids[prefix_ind], expect_sigid[prefix_ind],
-                                      *((int*) signal->payload->data),
-                                      *((int*) (signal->payload->data + sizeof(int))));
+                                      *((int*) payload),
+                                      *((int*) (payload + sizeof(int))));
 
                 // Check that the rest of the signal payload after prefix matches expectations.
-                if (*((int*) (signal->payload->data + sizeof(int))) != expect_sigid[prefix_ind]) {
+                if (*((int*) (payload + sizeof(int))) != expect_sigid[prefix_ind]) {
                     SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
                                           "%s: Expected signal ID [%.8X][%.8X], received [%.8X][%.8X]",
                                           test_id, prefix_ids[prefix_ind], expect_sigid[prefix_ind],
-                                          *((int*) signal->payload->data),
-                                          *((int*) (signal->payload->data + sizeof(int))));
+                                          *((int*) payload),
+                                          *((int*) (payload + sizeof(int))));
 
                     exit(1);
                 }

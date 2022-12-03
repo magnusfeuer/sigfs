@@ -61,7 +61,7 @@ void Queue::dump(const char* prefix, const Subscriber* sub)
         if (strlen(suffix) == 4)
             suffix[0] = 0;
 
-        SIGFS_LOG_DEBUG("%s: [%d] SigID[%lu] [%-*s]%s ", prefix, ind, queue_[ind].sig_id(), queue_[ind].signal()->data_size, queue_[ind].signal()->data, suffix);
+        SIGFS_LOG_DEBUG("%s: [%d] SigID[%lu] [%-*s]%s ", prefix, ind, queue_[ind].sig_id(), queue_[ind].payload()->payload_size, queue_[ind].payload()->payload, suffix);
         ++ind;
     }
 #endif

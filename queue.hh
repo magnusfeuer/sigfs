@@ -14,9 +14,33 @@ namespace sigfs {
 
     class Subscriber;
 
+
+    enum class Result {
+        ok = 0,
+        empty = 1,
+        would_block = 2
+    };
+
+
     class Queue {
     public:
         using index_t = std::uint32_t;
+
+        //
+        // The struct returned by each read operation.
+        // Reads should continue until you have received sizeof(sigfs_signal_t) + data_size bytes.
+        //
+        typedef struct payload_t_ {
+            uint32_t payload_size = 0; // Number of bytes in data.
+            char payload[];
+        } __attribute__((packed)) payload_t;
+
+        template<typename T>
+        using signal_callback_t = std::function<void(T userdata,
+                                                     signal_id_t signal_id,
+                                                     const char* payload,
+                                                     std::uint32_t payload_size,
+                                                     sigfs::signal_count_t lost_signals)>;
 
 
         // length has to be a power of 2:
@@ -110,22 +134,22 @@ namespace sigfs {
         class Signal {
         public:
             Signal(void):
-                data_alloc_(0),
+                payload_alloc_(0),
                 sig_id_(0),
-                signal_{}
+                payload_{}
             {
             }
 
             ~Signal(void)
             {
-                if (signal_)
-                    delete[] (char*) signal_;
+                if (payload_)
+                    delete[] (char*) payload_;
             }
 
 
-            inline const payload_t* signal(void) const
+            inline const payload_t* payload(void) const
             {
-                return signal_;
+                return payload_;
             }
 
 
@@ -141,26 +165,26 @@ namespace sigfs {
                 sig_id_ = id;
             }
 
-            inline void set(const id_t sig_id, const char* data, const size_t data_size)
+            inline void set(const id_t sig_id, const char* payload, const size_t payload_size)
             {
                 // First time allocation?
-                if (data_size + sizeof(signal_t) > data_alloc_) {
-                    if (signal_)
-                        delete[] (char*) signal_;
+                if (payload_size + sizeof(signal_t) > payload_alloc_) {
+                    if (payload_)
+                        delete[] (char*) payload_;
 
-                    signal_ = (payload_t*) new  char[sizeof(payload_t) + data_size];
-                    data_alloc_ = data_size + sizeof(payload_t);
+                    payload_ = (payload_t*) new  char[sizeof(payload_t) + payload_size];
+                    payload_alloc_ = payload_size + sizeof(payload_t);
                 }
 
-                signal_->data_size = data_size;
-                memcpy(signal_->data, data, data_size);
+                payload_->payload_size = payload_size;
+                memcpy(payload_->payload, payload, payload_size);
                 sig_id_ = sig_id;
             }
 
         private:
-            size_t data_alloc_;
+            size_t payload_alloc_;
             id_t sig_id_;
-            payload_t* signal_;
+            payload_t* payload_;
         };
 
 

@@ -111,11 +111,6 @@ namespace sigfs {
             }
 
             //
-            // We are now ready to read out the signal stored by sub->sig_id()
-            //
-//        queue_[index(sub->sig_id())].signal()->lost_signals = lost_signal_count;
-
-            //
             // We do the callback since signal is protected by mutex_.
             // Once this callback returns, the mutex will unlock when lock is detroyed
             // and the signal provded as an argument becomes unprotected.
@@ -128,14 +123,13 @@ namespace sigfs {
             // We could do recursive locks and lock it one extra time, but that
             // is a slower mutex and implementation in a very critical code path.
             //
-            const signal_t sig =
-                {
-                    .lost_signals = lost_signal_count,
-                    .signal_id = sub->sig_id(),
-                    .payload = queue_[index(sub->sig_id())].signal()
-                };
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Doing callback with %lu bytes", sig.payload->data_size);
-            cb( userdata, &sig);
+            const Signal& sig{queue_[index(sub->sig_id())]};
+            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Doing callback with %lu bytes", sig.payload()->payload_size);
+            cb( userdata,
+                sub->sig_id(),
+                queue_[index(sub->sig_id())].payload()->payload,
+                queue_[index(sub->sig_id())].payload()->payload_size,
+                lost_signal_count);
 
             // Bump signal id in preparation for the next signal.
             sub->set_sig_id(sub->sig_id() + 1);

@@ -20,6 +20,7 @@
 namespace sigfs {
     using index_t = std::int32_t;
 
+
     class Subscriber {
     public:
         typedef  std::function<bool(void)>  check_interrupt_cb_t;
