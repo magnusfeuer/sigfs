@@ -10,7 +10,7 @@
 // Simple publisher that writes signal(s) to a sigfs file.
 //
 #include <getopt.h>
-#include "sigfs.hh"
+#include "queue.hh"
 #include <string>
 #include <iostream>
 #include <memory.h>

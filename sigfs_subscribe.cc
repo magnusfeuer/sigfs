@@ -11,7 +11,7 @@
 //
 
 #include <getopt.h>
-#include "sigfs.hh"
+#include "queue.hh"
 #include <string>
 #include <iostream>
 #include <memory.h>

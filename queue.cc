@@ -11,8 +11,9 @@
 // Thread safe circular queue with loss detection
 //
 
-#include "sigfs.hh"
+#include "queue.hh"
 #include "log.h"
+#include "subscriber.hh"
 using namespace sigfs;
 
 Queue::Queue(const std::uint32_t queue_size):
@@ -67,8 +68,7 @@ void Queue::dump(const char* prefix, const Subscriber* sub)
 #endif
 }
 
-
-Result Queue::queue_signal(const char* data, const size_t data_size)
+void Queue::queue_signal(const char* data, const size_t data_size)
 {
 
     SIGFS_LOG_DEBUG("queue_signal(): Called");
@@ -128,7 +128,7 @@ Result Queue::queue_signal(const char* data, const size_t data_size)
         cond_.notify_one();
     }
 
-    return Result::ok;
+    return;
 }
 
 
@@ -166,3 +166,19 @@ const bool Queue::signal_available(const Subscriber* sub) const
     return true;
 }
 
+void Queue::interrupt_dequeue(Subscriber * sub)
+{
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "interrupt_dequeue(): Called", sub->sig_id());
+    std::unique_lock<std::mutex> lock(mutex_);
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "interrupt_dequeue(): Lock acquired", sub->sig_id());
+
+    // Wait for condition to be fulfilled.
+    cond_.wait(lock, [](void) { return true; });
+
+    sub->set_interrupted(true);
+    //
+    // Wake up all waiting threads to force them to check
+    // if their interrupt flag is set.
+    //
+    cond_.notify_all();
+}

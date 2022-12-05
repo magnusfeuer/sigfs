@@ -8,13 +8,15 @@
 
 #ifndef _SIGFS_QUEUE_IMPL__
 #define _SIGFS_QUEUE_IMPL__
-#include "sigfs_common.hh"
+#include "log.h"
+#include "queue.hh"
+#include "subscriber.hh"
 
 namespace sigfs {
     template<typename CallbackT>
-    const Result Queue::dequeue_signal(Subscriber* sub,
-                                       CallbackT userdata,
-                                       signal_callback_t<CallbackT>& cb) const
+    void Queue::dequeue_signal(Subscriber* sub,
+                               CallbackT userdata,
+                               signal_callback_t<CallbackT>& cb) const
     {
 
         SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Called", sub->sig_id());
@@ -42,6 +44,12 @@ namespace sigfs {
         const Queue& self(*this);
         auto check =
             [&self, &sub] {
+
+                //
+                // Are we interrupted?
+                //
+                if (sub->is_interrupted())
+                    return true;
 
                 //
                 // If current id < next id, then we are still waiting for
@@ -87,6 +95,13 @@ namespace sigfs {
             // Wait for condition to be fulfilled.
             cond_.wait(lock, check);
 
+            // Were we interrupted?
+            if (sub->is_interrupted()) {
+                cb( userdata, 0, 0, 0, 0);
+
+                return;
+            }
+
 
             //
             // If the ID of the oldest signal in the queue (tail()) is
@@ -124,7 +139,7 @@ namespace sigfs {
             // is a slower mutex and implementation in a very critical code path.
             //
             const Signal& sig{queue_[index(sub->sig_id())]};
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Doing callback with %lu bytes", sig.payload()->payload_size);
+            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Doing callback with %lu bytes.", sig.payload()->payload_size);
             cb( userdata,
                 sub->sig_id(),
                 queue_[index(sub->sig_id())].payload()->payload,
@@ -152,7 +167,7 @@ namespace sigfs {
           }
           }
         */
-        return Result::ok;
+        return;
     }
 }
 #endif // __SIGFS_QUEUE__

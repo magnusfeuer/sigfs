@@ -30,3 +30,6 @@
 *.exe
 *.out
 *.app
+test/sigfs_test_queue
+test/sigfs_test_speed
+sigfs

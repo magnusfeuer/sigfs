@@ -9,17 +9,13 @@
 #ifndef __SIGFS_QUEUE__
 #define __SIGFS_QUEUE__
 #include "sigfs_common.hh"
-
+#include <functional>
+#include <mutex>
+#include <condition_variable>
+#include <memory.h>
 namespace sigfs {
 
     class Subscriber;
-
-
-    enum class Result {
-        ok = 0,
-        empty = 1,
-        would_block = 2
-    };
 
 
     class Queue {
@@ -33,7 +29,7 @@ namespace sigfs {
         typedef struct payload_t_ {
             uint32_t payload_size = 0; // Number of bytes in data.
             char payload[];
-        } __attribute__((packed)) payload_t;
+        } payload_t;
 
         template<typename T>
         using signal_callback_t = std::function<void(T userdata,
@@ -50,16 +46,21 @@ namespace sigfs {
 
 
         // Queue data as a signal on queue.
-        Result queue_signal(const char* data, const size_t data_sz);
+        void queue_signal(const char* data, const size_t data_sz);
 
         //
         // Retrieve the data of the next signal for us to read.
         //
         //
-        template<typename CallbackT=void*> 
-        const Result dequeue_signal(Subscriber * sub,
-                                   CallbackT userdata,
-                                   signal_callback_t<CallbackT>& cb) const;
+        template<typename CallbackT=void*>
+        void dequeue_signal(Subscriber* sub,
+                            CallbackT userdata,
+                            signal_callback_t<CallbackT>& cb) const;
+
+        //
+        // Interrupt an ongoing dequeue_signal() call that is blockign
+        //
+        void interrupt_dequeue(Subscriber * sub);
 
         const bool signal_available(const Subscriber* sub) const;
 

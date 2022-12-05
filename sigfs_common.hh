@@ -9,6 +9,7 @@
 #ifndef __SIGFS_COMMON__
 #define __SIGFS_COMMON__
 
+#include <cstdint>
 namespace sigfs {
     using signal_id_t = std::uint64_t;
     using signal_count_t = std::uint32_t;
@@ -37,6 +38,6 @@ namespace sigfs {
         //
         uint32_t payload_size; // Number of bytes in data.
         char payload[];
-    };
+    } __attribute__((packed));
 }
 #endif // __SIGFS_COMMON__

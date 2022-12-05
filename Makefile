@@ -2,20 +2,20 @@
 # Top-level makefile for sigfs
 #
 
-.PHONY: all clean distclean install uninstall test install_test 
+.PHONY: all clean install uninstall test install_test 
 
-HDR=sigfs.hh log.h queue_impl.hh
+HDR=queue.hh subscriber.hh sigfs_common.hh log.h queue_impl.hh
 
 
 INCLUDES=-I/usr/local/include
 
-COMMON_SRC=log.cc 
+COMMON_SRC=log.cc queue.cc
 COMMON_OBJ=${patsubst %.cc, %.o, ${COMMON_SRC}}
 
 #
 # Signal FS main process
 #
-SIGFS_SRC=signal.cc queue.cc sigfs.cc 
+SIGFS_SRC=sigfs.cc 
 SIGFS_OBJ=${patsubst %.cc, %.o, ${SIGFS_SRC}}
 SIGFS=sigfs
 
@@ -32,6 +32,20 @@ SIGFS_PUBLISH=sigfs_publish
 SIGFS_SUBSCRIBE_SRC=sigfs_subscribe.cc
 SIGFS_SUBSCRIBE_OBJ=${patsubst %.cc, %.o, ${SIGFS_SUBSCRIBE_SRC}}
 SIGFS_SUBSCRIBE=sigfs_subscribe
+
+#
+# Signal test queue
+#
+SIGFS_TEST_QUEUE_SRC=test/sigfs_test_queue.cc
+SIGFS_TEST_QUEUE_OBJ=${patsubst %.cc, %.o, ${SIGFS_TEST_QUEUE_SRC}}
+SIGFS_TEST_QUEUE=./test/sigfs_test_queue
+
+#
+# Test for speed
+#
+SIGFS_TEST_SPEED_SRC=test/sigfs_test_speed.cc
+SIGFS_TEST_SPEED_OBJ=${patsubst %.cc, %.o, ${SIGFS_TEST_SPEED_SRC}}
+SIGFS_TEST_SPEED=./test/sigfs_test_speed
 
 
 DESTDIR ?= /usr/local
@@ -68,36 +82,50 @@ ${SIGFS_SUBSCRIBE}: ${SIGFS_SUBSCRIBE_OBJ} ${COMMON_OBJ}
 ${SIGFS_SUBSCRIBE_OBJ}: ${HDR}
 
 #
+# Test 
+#
+${SIGFS_TEST_QUEUE}: ${SIGFS_TEST_QUEUE_OBJ} ${COMMON_OBJ}
+	${CXX} -o ${SIGFS_TEST_QUEUE} ${SIGFS_TEST_QUEUE_OBJ} ${COMMON_OBJ} ${CXXFLAGS} 
+
+${SIGFS_TEST_QUEUE_OBJ}: ${HDR}
+
+${SIGFS_TEST_SPEED}: ${SIGFS_TEST_SPEED_OBJ} ${COMMON_OBJ}
+	${CXX} -o ${SIGFS_TEST_SPEED} ${SIGFS_TEST_SPEED_OBJ} ${COMMON_OBJ} ${CXXFLAGS} 
+
+${SIGFS_TEST_SPEED_OBJ}: ${HDR}
+
+
+#
 #	Remove all the generated files in this project.  Note that this does NOT
 #	remove the generated files in the submodules.  Use "make distclean" to
 #	clean up the submodules.
 #
 clean:
-	rm -f  ${SIGFS_PUBLISH_OBJ} ${SIGFS_SUBSCRIBE_OBJ}  ${SIGFS_OBJ} ${COMMON_OBJ} ${SIGFS} ${SIGFS_PUBLISH} ${SIGFS_SUBSCRIBE} *~ 
-	@${MAKE} DESTDIR=${DESTDIR} -C test clean; \
+	rm -f   ${SIGFS_PUBLISH_OBJ} \
+		${SIGFS_SUBSCRIBE_OBJ} \
+		${SIGFS_TEST_QUEUE_OBJ} \
+		${SIGFS_TEST_SPEED_OBJ} \
+		${SIGFS_OBJ} \
+		${COMMON_OBJ} \
+		${SIGFS} \
+		${SIGFS_PUBLISH} \
+		${SIGFS_SUBSCRIBE} \
+		*~ 
 
-
-
-#
-#	Remove all of the generated files including any in the submodules.
-#
-distclean: clean
-	@${MAKE} clean
 
 #
 #	Install the generated files.
 #
 install:  ${SIGFS}
 	install -d ${DESTDIR}/bin; \
-	install -m 0644 ${SIGFS}  ${DESTDIR}/bin; 
-	install -m 0644 ${SIGFS_PUBLISH}  ${DESTDIR}/bin; 
-	install -m 0644 ${SIGFS_SUBSCRIBE}  ${DESTDIR}/bin; 
+	install -m 0755 ${SIGFS}  ${DESTDIR}/bin; 
+	install -m 0755 ${SIGFS_PUBLISH}  ${DESTDIR}/bin; 
+	install -m 0755 ${SIGFS_SUBSCRIBE}  ${DESTDIR}/bin; 
 
 #
 #	Uninstall the generated files.
 #
 uninstall:
-	@${MAKE} DESTDIR=${DESTDIR} -C test uninstall; \
 	rm -f ${DESTDIR}/bin/${SIGFS}; 
 	rm -f ${DESTDIR}/bin/${SIGFS_PUBLISH}; 
 	rm -f ${DESTDIR}/bin/${SIGFS_SUBSCRIBE}; 
@@ -106,12 +134,13 @@ uninstall:
 #
 # Build tests only
 #
-test:	${SIGFS}
-	${MAKE} CXXFLAGS="${CXXFLAGS}" -C test
+test:	${SIGFS_TEST_SPEED} ${SIGFS_TEST_QUEUE}
 
 
 #
 #	Install the generated example files.
 #
 install_test:
-	${MAKE} DESTDIR="${DESTDIR}" -C test install
+	install -d ${DESTDIR}/bin; \
+	install -m 0755 ${SIGFS_TEST_QUEUE} ${DESTDIR}/bin; 
+	install -m 0755 ${SIGFS_TEST_SPEED} ${DESTDIR}/bin; 

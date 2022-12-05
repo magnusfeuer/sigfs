@@ -6,13 +6,12 @@
 // Author: Magnus Feuer (magnus@feuerworks.com)
 //
 
-#ifndef __SIGFS__
-#define __SIGFS__
+#ifndef __SIGFS_SUBSCRIBER__
+#define __SIGFS_SUBSCRIBER__
 
 #include <cstdint>
 #include <functional>
 #include <mutex>
-#include <condition_variable>
 #include <vector>
 #include <string.h>
 #include "queue.hh"
@@ -23,11 +22,8 @@ namespace sigfs {
 
     class Subscriber {
     public:
-        typedef  std::function<bool(void)>  check_interrupt_cb_t;
-        Subscriber(Queue& queue,
-                   check_interrupt_cb_t check_interrupt = []() -> bool { return false; } ):
+        Subscriber(Queue& queue):
             queue_(queue),
-            check_interrupt_(check_interrupt),
             sig_id_(queue.tail_sig_id())
         {
             static std::mutex mutex_;
@@ -53,24 +49,33 @@ namespace sigfs {
             sig_id_ = sig_id;
         }
 
+        inline void interrupt_dequeue(void)
+        {
+            queue_.interrupt_dequeue(this);
+        }
+
         inline Queue& queue(void)
         {
             return queue_;
         }
 
-
-        inline bool check_interrupt(void)
+        inline bool is_interrupted(void) const
         {
-            return check_interrupt_();
+            return interrupted_;
         }
+
+        inline void set_interrupted(bool interrupted) 
+        {
+            interrupted_ = interrupted;
+        }
+
+
 
     private:
         Queue& queue_;
-
-        std::function<bool(void)> check_interrupt_;
-
         signal_id_t sig_id_; // The Id of the next signal we are about to read.
         int sub_id_; // Used to color separate logging on a per subscribed basis
+        bool interrupted_; // Set to true to indicate that a dequeue_signal() has been interrupted.
     };
 }
-#endif // __SIGFS__
+#endif // __SIGFS_SUBSCRIBER__

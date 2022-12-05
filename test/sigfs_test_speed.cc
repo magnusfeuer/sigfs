@@ -11,8 +11,8 @@
 //
 
 #include <getopt.h>
-#include "../sigfs.hh"
-#include "../log.h"
+#include "../queue_impl.hh"
+#include "../subscriber.hh"
 #include <string>
 #include <iostream>
 #include <memory.h>
@@ -27,7 +27,6 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <thread>
-#include "../queue_impl.hh"
 
 int queue_length{131072};
 
@@ -56,7 +55,7 @@ void publish_signal_sequence(sigfs::Queue* queue, const int publish_id, int coun
                         *((int*) (buf + sizeof(int))),
                         publish_id, sig_id);
 
-        assert(queue->queue_signal(buf, 2*sizeof(int)) == sigfs::Result::ok);
+        queue->queue_signal(buf, 2*sizeof(int));
     }
     SIGFS_LOG_DEBUG("Done. Published %d signals", count);
 }
@@ -156,7 +155,7 @@ void check_signal_sequence(sigfs::Queue* queue,
     for (ind = 0; ind < count; ++ind) {
 
 
-        assert(queue->dequeue_signal<void*>(sub, 0, cb) == sigfs::Result::ok);
+        queue->dequeue_signal<void*>(sub, 0, cb);
 
 
     }
@@ -261,7 +260,7 @@ int main(int argc,  char *const* argv)
     }
 
     auto done = sigfs_usec_since_start();
-    printf("queue-length: %d, nr-publishers: %d, nr-subscribers: %d, signal-count: %d, execution-time: %ld usec, %.0f signals/sec, %f nanosec/signal\n",
+    printf("queue-length: %d, nr-publishers: %d, nr-subscribers: %d, signal-count: %d, execution-time: %ld usec, %.0f signals/sec, %f nsec/signal\n",
            queue_length, nr_publishers, nr_subscribers, signal_count * nr_publishers, done,
            (float) (signal_count*nr_publishers) / (float) (done / 1000000.0),
            (float) done*1000 / (float) (signal_count*nr_publishers));

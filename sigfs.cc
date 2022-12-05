@@ -20,11 +20,11 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include "sigfs.hh"
 
 #include "log.h"
-
 #include "queue_impl.hh"
+#include "subscriber.hh"
+
 using namespace sigfs;
 
 Queue* g_queue(0);
@@ -67,6 +67,7 @@ static void print_file_info(const char* prefix, struct fuse_file_info* fi)
     if (fi->flags & O_APPEND) strcat(res, " O_APPEND");
     SIGFS_LOG_DEBUG(res);
 }
+
 
 
 static void do_init(void* userdata, struct fuse_conn_info* conn)
@@ -218,7 +219,7 @@ static void do_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
     //     return;
     // }
 
-    Subscriber *sub = new Subscriber(*g_queue, (bool (*)(void)) fuse_req_interrupted);
+    Subscriber *sub = new Subscriber(*g_queue);
     fi->fh = (uint64_t) sub; // It works. Stop whining.
     fi->direct_io=1;
     fi->nonseekable=1;
@@ -228,6 +229,13 @@ static void do_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
     return;
 }
 
+
+static void read_interrupt(fuse_req_t req, void *data)
+{
+    Subscriber* sub{(Subscriber*) data};
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "read_interrupt(): Called");
+    sub->interrupt_dequeue();
+}
 
 
 static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
@@ -245,15 +253,22 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
         return;
     }
 
-    if (offset != 0) {
-        SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "do_read(): Offset %lu not implemented.", offset);
-        exit(1);
-    }
+    // if (offset != 0) {
+    //     SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "do_read(): Offset %lu not implemented.", offset);
+    //     exit(1);
+    // }
 
     Queue::signal_callback_t<fuse_req_t> cb =
-        [sub](fuse_req_t userdata, signal_id_t signal_id, const char* payload, std::uint32_t payload_size, sigfs::signal_count_t lost_signals) {
+        [sub](fuse_req_t req, signal_id_t signal_id, const char* payload, std::uint32_t payload_size, sigfs::signal_count_t lost_signals) {
+            // Is this an interrupt call?
+            if (!signal_id) {
+                SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Interrupted!");
+		fuse_reply_err(req, EINTR);
+                sub->set_interrupted(false);
+                return;
+            }
 
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Sending back %lu bytes", sizeof(signal_t) + payload_size);
+            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Sending back %lu bytes: [%-*s]", sizeof(signal_t) + payload_size, payload_size, payload);
             signal_t sig = {
                 .lost_signals = lost_signals,
                 .signal_id = signal_id,
@@ -271,11 +286,13 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
                 }
             };
 
-            //return fuse_reply_buf(userdata, (char*) signal, sizeof(signal_t) + signal->payload->data_size);
-            return fuse_reply_iov(userdata, iov, 2);
+            fuse_reply_iov(req, iov, 2);
+            return;
         };
 
+    fuse_req_interrupt_func(req, read_interrupt, (void*) sub);
     g_queue->dequeue_signal<fuse_req_t>(sub, req, cb);
+    fuse_req_interrupt_func(req, 0, 0);
     return;
 }
 
@@ -299,10 +316,10 @@ static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
         return;
     }
 
-    if (offset != 0) {
-        SIGFS_LOG_INDEX_FATAL(sub->sub_id(),"do_write(%lu): offset is %lu. Needs to be 0", ino,offset);
-        exit(1);
-    }
+    // if (offset != 0) {
+    //     SIGFS_LOG_INDEX_FATAL(sub->sub_id(),"do_write(%lu): offset is %lu. Needs to be 0", ino,offset);
+    //     exit(1);
+    // }
 
     g_queue->queue_signal(buffer, size);
     fuse_reply_write(req, size);
@@ -401,6 +418,9 @@ int main( int argc, char *argv[] )
         goto err_out1;
     }
 
+    
+void fuse_req_interrupt_func(fuse_req_t req, fuse_interrupt_func_t func,
+			     void *data);
     fuse_set_log_func(dummy_log);
     se = fuse_session_new(&args, &operations, sizeof(operations), NULL);
     if (se == NULL)

@@ -11,8 +11,6 @@
 //
 
 #include <getopt.h>
-#include "../sigfs.hh"
-#include "../log.h"
 #include <string>
 #include <iostream>
 #include <memory.h>
@@ -29,7 +27,6 @@
 #include <sys/resource.h>
 
 #include "../queue_impl.hh"
-
 void usage(const char* name)
 {
     std::cout << "Usage: " << name << " -d <data> | --data=<data>" << std::endl;
@@ -65,7 +62,7 @@ void check_signal(sigfs::Queue* queue, const char* prefix, sigfs::Subscriber* su
             }
         };
 
-    assert(queue->dequeue_signal<void*>(sub, 0, cb) == sigfs::Result::ok);
+    queue->dequeue_signal<void*>(sub, 0, cb);
 
 }
 
@@ -86,7 +83,7 @@ void publish_signal_sequence(const char* test_id, sigfs::Queue* queue, const int
                         *((int*) (buf + sizeof(int))),
                         publish_id, sig_id);
 
-        assert(queue->queue_signal(buf, 2*sizeof(int)) == sigfs::Result::ok);
+        queue->queue_signal(buf, 2*sizeof(int));
     }
     SIGFS_LOG_DEBUG("%s: Done. Published %d signals", test_id, count);
 }
@@ -202,7 +199,7 @@ void check_signal_sequence(const char* test_id,
                 expect_sigid[prefix_ind]++;
         };
 
-        assert(sub->queue().dequeue_signal<void*>(sub, (void*) 0, cb) == sigfs::Result::ok);
+        sub->queue().dequeue_signal<void*>(sub, (void*) 0, cb);
 
     }
 
@@ -291,7 +288,7 @@ int main(int argc,  char *const* argv)
         Subscriber *sub1{new Subscriber(*g_queue)};
         Subscriber *sub2{new Subscriber(*g_queue)};
         SIGFS_LOG_DEBUG("START: 1.0");
-        assert(g_queue->queue_signal( "SIG000", 7) == sigfs::Result::ok);
+        g_queue->queue_signal( "SIG000", 7);
         check_signal(g_queue, "1.0.1", sub1, "SIG000", 7, 0);
         SIGFS_LOG_INFO("PASS: 1.0");
 
@@ -304,8 +301,8 @@ int main(int argc,  char *const* argv)
         // Two signals published, two signals read
         //
         SIGFS_LOG_DEBUG("START: 1.1");
-        assert(g_queue->queue_signal("SIG001", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG002", 7) == sigfs::Result::ok);
+        g_queue->queue_signal("SIG001", 7);
+        g_queue->queue_signal("SIG002", 7);
 
         check_signal(g_queue, "1.1.1", sub1, "SIG001", 7, 0);
         check_signal(g_queue, "1.1.2", sub1, "SIG002", 7, 0);
@@ -335,12 +332,12 @@ int main(int argc,  char *const* argv)
         // Lost signals by overflowing the queue
         //
         SIGFS_LOG_DEBUG("START: 1.3");
-        assert(g_queue->queue_signal("SIG003", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG004", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG005", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG006", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG007", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG008", 7) == sigfs::Result::ok);
+        g_queue->queue_signal("SIG003", 7);
+        g_queue->queue_signal("SIG004", 7);
+        g_queue->queue_signal("SIG005", 7);
+        g_queue->queue_signal("SIG006", 7);
+        g_queue->queue_signal("SIG007", 7);
+        g_queue->queue_signal("SIG008", 7);
         check_signal(g_queue, "1.3.1", sub1, "SIG006", 7, 3);
         check_signal(g_queue, "1.3.2", sub1, "SIG007", 7, 0);
         check_signal(g_queue, "1.3.3", sub1, "SIG008", 7, 0);
@@ -350,15 +347,15 @@ int main(int argc,  char *const* argv)
         // Double overwrap of queue
         //
         SIGFS_LOG_DEBUG("START: 1.4");
-        assert(g_queue->queue_signal("SIG009", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG010", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG011", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG012", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG013", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG014", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG015", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG016", 7) == sigfs::Result::ok);
-        assert(g_queue->queue_signal("SIG017", 7) == sigfs::Result::ok);
+        g_queue->queue_signal("SIG009", 7);
+        g_queue->queue_signal("SIG010", 7);
+        g_queue->queue_signal("SIG011", 7);
+        g_queue->queue_signal("SIG012", 7);
+        g_queue->queue_signal("SIG013", 7);
+        g_queue->queue_signal("SIG014", 7);
+        g_queue->queue_signal("SIG015", 7);
+        g_queue->queue_signal("SIG016", 7);
+        g_queue->queue_signal("SIG017", 7);
 
         check_signal(g_queue, "1.4.1", sub1, "SIG015", 7, 6);
         check_signal(g_queue, "1.4.2", sub1, "SIG016", 7, 0);
