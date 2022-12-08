@@ -24,7 +24,8 @@ namespace sigfs {
     public:
         Subscriber(Queue& queue):
             queue_(queue),
-            sig_id_(queue.tail_sig_id())
+            sig_id_(0),
+            interrupted_(false)
         {
             static std::mutex mutex_;
             static int next_sub_id = 0;
@@ -64,7 +65,7 @@ namespace sigfs {
             return interrupted_;
         }
 
-        inline void set_interrupted(bool interrupted) 
+        inline void set_interrupted(bool interrupted)
         {
             interrupted_ = interrupted;
         }

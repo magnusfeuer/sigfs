@@ -45,6 +45,12 @@ void check_signal(sigfs::Queue* queue, const char* prefix, sigfs::Subscriber* su
         [queue, prefix, wanted_res, sub, wanted_data, wanted_lost_signals]
         (void* userdata, sigfs::signal_id_t signal_id, const char* payload, std::uint32_t payload_size, sigfs::signal_count_t lost_signals)
         {
+            if (!payload) {
+                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted %lu bytes. Got interrupted!", prefix, wanted_res);
+                queue->dump(prefix, sub);
+                exit(1);
+            }
+
             if ((int) payload_size != wanted_res) {
                 SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted %lu bytes. Got %lu bytes", prefix, wanted_res, payload_size);
                 queue->dump(prefix, sub);
@@ -67,28 +73,6 @@ void check_signal(sigfs::Queue* queue, const char* prefix, sigfs::Subscriber* su
 }
 
 
-void publish_signal_sequence(const char* test_id, sigfs::Queue* queue, const int publish_id, int count)
-{
-    int sig_id{0};
-    char buf[256];
-
-    SIGFS_LOG_DEBUG("%s: Called. Publishing %d signals", test_id, count);
-
-    for(sig_id = 0; sig_id < count; ++sig_id) {
-        *((int*) buf) = publish_id;
-        *((int*) (buf + sizeof(int))) = sig_id;
-        SIGFS_LOG_DEBUG("%s: Publishing signal [%.8X][%.8X] (%.8X %.8X)",
-                        test_id,
-                        *((int*) buf),
-                        *((int*) (buf + sizeof(int))),
-                        publish_id, sig_id);
-
-        queue->queue_signal(buf, 2*sizeof(int));
-    }
-    SIGFS_LOG_DEBUG("%s: Done. Published %d signals", test_id, count);
-}
-
-
 // Verify that we get a sequence of signals, possibly produced by more
 // than one publisher.
 //
@@ -104,7 +88,6 @@ void publish_signal_sequence(const char* test_id, sigfs::Queue* queue, const int
 //
 // Signals from each publisher are expected to have the format
 // <prefix_id (4 bytes)><sequence_id (4 bytes)>
-
 //
 void check_signal_sequence(const char* test_id,
                            sigfs::Subscriber* sub,
@@ -207,6 +190,53 @@ void check_signal_sequence(const char* test_id,
 }
 
 
+
+void validate_signal(sigfs::Queue* queue,
+                     int sub_count,
+                     const char* test_id,
+                     const char* data,
+                     int lost_signals)
+{
+    std::unique_ptr<std::thread> threads[sub_count];
+
+    for (int ind=0; ind < sub_count; ++ind)
+        threads[ind] = std::make_unique<std::thread> (
+            [test_id, data, queue, lost_signals]() {
+                sigfs::Subscriber sub(*queue);
+                check_signal(queue, test_id, &sub, data, strlen(data) + 1, lost_signals);
+            });
+
+    // Wait for thread to fire up.
+    // Non-dermenistic, but this is not a problem here.
+    usleep(10000);
+    queue->queue_signal(data, strlen(data)+1);
+
+    for (int ind=0; ind < sub_count; ++ind)
+        threads[ind]->join();
+}
+
+void publish_signal_sequence(const char* test_id, sigfs::Queue* queue, const int publish_id, int count)
+{
+    int sig_id{0};
+    char buf[256];
+
+    SIGFS_LOG_DEBUG("%s: Called. Publishing %d signals", test_id, count);
+
+    for(sig_id = 0; sig_id < count; ++sig_id) {
+        *((int*) buf) = publish_id;
+        *((int*) (buf + sizeof(int))) = sig_id;
+        SIGFS_LOG_DEBUG("%s: Publishing signal [%.8X][%.8X] (%.8X %.8X)",
+                        test_id,
+                        *((int*) buf),
+                        *((int*) (buf + sizeof(int))),
+                        publish_id, sig_id);
+
+        queue->queue_signal(buf, 2*sizeof(int));
+    }
+    SIGFS_LOG_DEBUG("%s: Done. Published %d signals", test_id, count);
+}
+
+
 int main(int argc,  char *const* argv)
 {
     using namespace sigfs;
@@ -288,12 +318,7 @@ int main(int argc,  char *const* argv)
         Subscriber *sub1{new Subscriber(*g_queue)};
         Subscriber *sub2{new Subscriber(*g_queue)};
         SIGFS_LOG_DEBUG("START: 1.0");
-        g_queue->queue_signal( "SIG000", 7);
-        check_signal(g_queue, "1.0.1", sub1, "SIG000", 7, 0);
-        SIGFS_LOG_INFO("PASS: 1.0");
-
-        // Have second subscriber read signal
-        check_signal(g_queue, "1.0.2", sub2, "SIG000", 7, 0);
+        validate_signal(g_queue, 1, "1.0.1", "SIG000", 0);
         SIGFS_LOG_INFO("PASS: 1.0");
 
 

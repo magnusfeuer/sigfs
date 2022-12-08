@@ -23,7 +23,7 @@ namespace sigfs {
 
         // Have we lost signals?
         // We have the sig_id of currently stored signal in queue[index(sub->sig_id())].sig_id()
-        // We have the ID of the next signal to process is in sub->sig_id()
+        // We havne the ID of the next signal to process is in sub->sig_id()
         // If the current id < next id then we are waiting for a new signal to fill the slot
         // If the current id == next_id, then the signal is ready to read
         // If the current id > next_id then we have lost signals.
@@ -92,13 +92,19 @@ namespace sigfs {
             std::unique_lock<std::mutex> lock(mutex_);
             SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Lock acquired", sub->sig_id());
 
+            //
+            // If this is the first call of subscriber, then initialize
+            // it to the next signal we are about to read.
+            //
+            if (sub->sig_id() == 0)
+                sub->set_sig_id(next_sig_id_);
+
             // Wait for condition to be fulfilled.
             cond_.wait(lock, check);
 
             // Were we interrupted?
             if (sub->is_interrupted()) {
                 cb( userdata, 0, 0, 0, 0);
-
                 return;
             }
 
@@ -138,8 +144,8 @@ namespace sigfs {
             // We could do recursive locks and lock it one extra time, but that
             // is a slower mutex and implementation in a very critical code path.
             //
-            const Signal& sig{queue_[index(sub->sig_id())]};
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Doing callback with %lu bytes.", sig.payload()->payload_size);
+            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Doing callback with %lu bytes.",
+                                  queue_[index(sub->sig_id())].payload()->payload_size);
             cb( userdata,
                 sub->sig_id(),
                 queue_[index(sub->sig_id())].payload()->payload,

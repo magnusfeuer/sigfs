@@ -76,6 +76,7 @@ namespace sigfs {
             return tail_sig_id_();
         }
 
+
     private:
 
 
@@ -83,6 +84,7 @@ namespace sigfs {
         inline const signal_id_t tail_sig_id_(void) const {
             return queue_[tail()].sig_id();
         }
+
 
         // Prerequisite: queue size is always a power of 2.
         inline const index_t index(const signal_id_t id) const

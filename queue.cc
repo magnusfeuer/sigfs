@@ -18,11 +18,11 @@ using namespace sigfs;
 
 Queue::Queue(const std::uint32_t queue_size):
     active_subscribers_(0),
-    next_sig_id_(0),
+    next_sig_id_(1),
     queue_(queue_size),
     queue_mask_(queue_size-1),
-    head_(0),
-    tail_(0)
+    head_(1),
+    tail_(1)
 {
     if (queue_size < 4) {
         SIGFS_LOG_FATAL("Queue::Queue(): queue_size < 4");

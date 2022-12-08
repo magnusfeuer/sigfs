@@ -225,7 +225,7 @@ static void do_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
     fi->nonseekable=1;
     fuse_reply_open(req, fi);
 
-    SIGFS_LOG_DEBUG("do_open(): Returning ok");
+    SIGFS_LOG_DEBUG("do_open(): Returning ok" , sub->sig_id());
     return;
 }
 
@@ -261,7 +261,7 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
     Queue::signal_callback_t<fuse_req_t> cb =
         [sub](fuse_req_t req, signal_id_t signal_id, const char* payload, std::uint32_t payload_size, sigfs::signal_count_t lost_signals) {
             // Is this an interrupt call?
-            if (!signal_id) {
+            if (!payload) {
                 SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Interrupted!");
 		fuse_reply_err(req, EINTR);
                 sub->set_interrupted(false);
