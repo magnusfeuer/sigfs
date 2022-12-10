@@ -53,7 +53,7 @@ namespace sigfs {
 
         inline void interrupt_dequeue(void)
         {
-            queue_.interrupt_dequeue(this);
+            queue_.interrupt_dequeue(*this);
         }
 
         inline Queue& queue(void)
@@ -73,7 +73,7 @@ namespace sigfs {
 
         const bool signal_available(void) const
         {
-            return queue_.signal_available(this);
+            return queue_.signal_available(*this);
         }
 
 

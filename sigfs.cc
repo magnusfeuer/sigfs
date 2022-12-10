@@ -291,7 +291,7 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
         };
 
     fuse_req_interrupt_func(req, read_interrupt, (void*) sub);
-    g_queue->dequeue_signal<fuse_req_t>(sub, req, cb);
+    g_queue->dequeue_signal<fuse_req_t>(*sub, req, cb);
     fuse_req_interrupt_func(req, 0, 0);
     return;
 }

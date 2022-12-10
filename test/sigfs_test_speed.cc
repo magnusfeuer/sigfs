@@ -155,7 +155,7 @@ void check_signal_sequence(sigfs::Queue* queue,
     for (ind = 0; ind < count; ++ind) {
 
 
-        queue->dequeue_signal<void*>(sub, 0, cb);
+        queue->dequeue_signal<void*>(*sub, 0, cb);
 
 
     }

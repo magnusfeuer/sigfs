@@ -53,23 +53,23 @@ namespace sigfs {
         //
         //
         template<typename CallbackT=void*>
-        void dequeue_signal(Subscriber* sub,
+        void dequeue_signal(Subscriber& sub,
                             CallbackT userdata,
                             signal_callback_t<CallbackT>& cb) const;
 
         //
         // Interrupt an ongoing dequeue_signal() call that is blockign
         //
-        void interrupt_dequeue(Subscriber * sub);
+        void interrupt_dequeue(Subscriber& sub);
 
-        const bool signal_available(const Subscriber* sub) const;
+        const bool signal_available(const Subscriber& sub) const;
 
 
         inline index_t queue_length(void) const {
             return queue_mask_+1;
         }
 
-        void dump(const char* prefix, const Subscriber* sub);
+        void dump(const char* prefix, const Subscriber& sub);
 
         inline const signal_id_t tail_sig_id(void) const {
             std::lock_guard<std::mutex> lock(mutex_);

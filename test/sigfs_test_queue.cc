@@ -35,9 +35,9 @@ void usage(const char* name)
     std::cout << "        -s <usec> | --sleep=<usec>" << std::endl;
 }
 
-void check_signal(sigfs::Queue* queue,
+void check_signal(sigfs::Queue& queue,
                   const char* prefix,
-                  sigfs::Subscriber* sub,
+                  sigfs::Subscriber& sub,
                   const char* wanted_data,
                   int wanted_res,
                   int wanted_lost_signals)
@@ -47,33 +47,33 @@ void check_signal(sigfs::Queue* queue,
     memset(buf, 0, sizeof(buf));
 
     sigfs::Queue::signal_callback_t<void*> cb =
-        [queue, prefix, wanted_res, sub, wanted_data, wanted_lost_signals]
+        [&queue, prefix, wanted_res, &sub, wanted_data, wanted_lost_signals]
         (void* userdata, sigfs::signal_id_t signal_id, const char* payload, std::uint32_t payload_size, sigfs::signal_count_t lost_signals)
         {
             if (!payload) {
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted %lu bytes. Got interrupted!", prefix, wanted_res);
-                queue->dump(prefix, sub);
+                SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Wanted %lu bytes. Got interrupted!", prefix, wanted_res);
+                queue.dump(prefix, sub);
                 exit(1);
             }
 
             if ((int) payload_size != wanted_res) {
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted %lu bytes. Got %lu bytes", prefix, wanted_res, payload_size);
-                queue->dump(prefix, sub);
+                SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Wanted %lu bytes. Got %lu bytes", prefix, wanted_res, payload_size);
+                queue.dump(prefix, sub);
                 exit(1);
             }
             if (memcmp(payload, wanted_data, payload_size)) {
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted data [%-*s]. Got [%-*s]", prefix, wanted_res, wanted_data, (int) payload_size, payload);
-                queue->dump(prefix, sub);
+                SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Wanted data [%-*s]. Got [%-*s]", prefix, wanted_res, wanted_data, (int) payload_size, payload);
+                queue.dump(prefix, sub);
                 exit(1);
             }
             if ((int) lost_signals != wanted_lost_signals) {
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Wanted lost signals %lu. Got %lu", prefix, wanted_lost_signals, lost_signals);
-                queue->dump(prefix, sub);
+                SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Wanted lost signals %lu. Got %lu", prefix, wanted_lost_signals, lost_signals);
+                queue.dump(prefix, sub);
                 exit(1);
             }
         };
 
-    queue->dequeue_signal<void*>(sub, 0, cb);
+    queue.dequeue_signal<void*>(sub, 0, cb);
 }
 
 
@@ -94,7 +94,7 @@ void check_signal(sigfs::Queue* queue,
 // <prefix_id (4 bytes)><sequence_id (4 bytes)>
 //
 void check_signal_sequence(const char* test_id,
-                           sigfs::Subscriber* sub,
+                           sigfs::Subscriber& sub,
                            const int* prefix_ids,
                            int prefix_count,
                            int count)
@@ -119,24 +119,24 @@ void check_signal_sequence(const char* test_id,
                 (void) x;
 
                 if (payload_size != 2*sizeof(int)) {
-                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Expected %d bytes, got %d bytes,",
+                    SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Expected %d bytes, got %d bytes,",
                                           test_id, 2*sizeof(int), payload_size);
                     exit(0);
                 }
 
                 // Did we lose signals?
                 if (lost_signals > 0) {
-                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "%s: Lost %d signals,", test_id, lost_signals);
+                    SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Lost %d signals,", test_id, lost_signals);
                     exit(0);
                 }
 
                 // for(std::uint32_t ind = 0; ind < payload_size; ++ind) {
-                //     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
+                //     SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
                 //                           "%s: Byte %d: %.2X", test_id, ind, (char) payload[ind]);
                 // }
                 // Find correct prefix
                 for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
-                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
+                    SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
                                           "%s: Checking payload first four bytes [%.8X] bytes against prefix [%.8X]",
                                           test_id,
                                           *((int*) payload),
@@ -148,22 +148,22 @@ void check_signal_sequence(const char* test_id,
 
                 // Did we not recognize prefix?
                 if (prefix_ind == prefix_count) {
-                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
+                    SIGFS_LOG_INDEX_FATAL(sub.sub_id(),
                                           "%s: No prefix matched first four payload bytes [%.8X]",
                                           test_id,
                                           *((int*) payload));
 
-                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(),  "%s: Available prefixes are:", test_id);
+                    SIGFS_LOG_INDEX_FATAL(sub.sub_id(),  "%s: Available prefixes are:", test_id);
 
                     for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
-                        SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
+                        SIGFS_LOG_INDEX_FATAL(sub.sub_id(),
                                               "%s:   [%.8X]",
                                               test_id, prefix_ids[prefix_ind]);
                     }
                     exit(1);
                 }
 
-                SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
+                SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
                                       "%s: Comparing expected signal ID [%.8X][%.8X] with received [%.8X][%.8X]",
                                       test_id,
                                       prefix_ids[prefix_ind], expect_sigid[prefix_ind],
@@ -172,7 +172,7 @@ void check_signal_sequence(const char* test_id,
 
                 // Check that the rest of the signal payload after prefix matches expectations.
                 if (*((int*) (payload + sizeof(int))) != expect_sigid[prefix_ind]) {
-                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
+                    SIGFS_LOG_INDEX_FATAL(sub.sub_id(),
                                           "%s: Expected signal ID [%.8X][%.8X], received [%.8X][%.8X]",
                                           test_id, prefix_ids[prefix_ind], expect_sigid[prefix_ind],
                                           *((int*) payload),
@@ -184,9 +184,9 @@ void check_signal_sequence(const char* test_id,
                 // Payload good. Increase next expected signal ID for the
                 // given prefix
                 expect_sigid[prefix_ind]++;
-        };
+            };
 
-        sub->queue().dequeue_signal<void*>(sub, (void*) 0, cb);
+        sub.queue().dequeue_signal<void*>(sub, (void*) 0, cb);
 
     }
 
@@ -195,7 +195,7 @@ void check_signal_sequence(const char* test_id,
 
 
 
-void validate_signal(sigfs::Queue* queue,
+void validate_signal(sigfs::Queue& queue,
                      int sub_count,
                      const char* test_id,
                      const char* data,
@@ -205,21 +205,21 @@ void validate_signal(sigfs::Queue* queue,
 
     for (int ind=0; ind < sub_count; ++ind)
         threads[ind] = std::make_unique<std::thread> (
-            [test_id, data, queue, lost_signals]() {
-                sigfs::Subscriber sub(*queue);
-                check_signal(queue, test_id, &sub, data, strlen(data) + 1, lost_signals);
+            [test_id, data, &queue, lost_signals]() {
+                sigfs::Subscriber sub(queue);
+                check_signal(queue, test_id, sub, data, strlen(data) + 1, lost_signals);
             });
 
     // Wait for thread to fire up.
     // Non-dermenistic, but this is not a problem here.
     usleep(10000);
-    queue->queue_signal(data, strlen(data)+1);
+    queue.queue_signal(data, strlen(data)+1);
 
     for (int ind=0; ind < sub_count; ++ind)
         threads[ind]->join();
 }
 
-void publish_signal_sequence(const char* test_id, sigfs::Queue* queue, const int publish_id, int count)
+void publish_signal_sequence(const char* test_id, sigfs::Queue& queue, const int publish_id, int count)
 {
     int sig_id{0};
     char buf[256];
@@ -235,7 +235,7 @@ void publish_signal_sequence(const char* test_id, sigfs::Queue* queue, const int
                         *((int*) (buf + sizeof(int))),
                         publish_id, sig_id);
 
-        queue->queue_signal(buf, 2*sizeof(int));
+        queue.queue_signal(buf, 2*sizeof(int));
     }
     SIGFS_LOG_DEBUG("%s: Done. Published %d signals", test_id, count);
 }
@@ -318,16 +318,16 @@ int main(int argc,  char *const* argv)
         // One signal published. One signal read
         //
 
-        Queue* g_queue(new Queue(4));
+        Queue g_queue(4);
 
         {
             SIGFS_LOG_DEBUG("START: 1.0");
-            Subscriber sub(*g_queue);
-            g_queue->queue_signal("SIG001", 7);
+            Subscriber sub(g_queue);
+            g_queue.queue_signal("SIG001", 7);
 
-            assert(g_queue->signal_available(&sub));
-            check_signal(g_queue, "1.0.1", &sub, "SIG001", 7, 0);
-            assert(!g_queue->signal_available(&sub));
+            assert(g_queue.signal_available(sub));
+            check_signal(g_queue, "1.0.1", sub, "SIG001", 7, 0);
+            assert(!g_queue.signal_available(sub));
 
             SIGFS_LOG_INFO("PASS: 1.0");
         }
@@ -338,27 +338,27 @@ int main(int argc,  char *const* argv)
             // Two signals published, two signals read
             //
             SIGFS_LOG_DEBUG("START: 1.1");
-            Subscriber sub1(*g_queue);
-            Subscriber sub2(*g_queue);
+            Subscriber sub1(g_queue);
+            Subscriber sub2(g_queue);
 
-            g_queue->queue_signal("SIG001", 7);
-            g_queue->queue_signal("SIG002", 7);
+            g_queue.queue_signal("SIG001", 7);
+            g_queue.queue_signal("SIG002", 7);
 
-            assert(g_queue->signal_available(&sub1));
-            check_signal(g_queue, "1.1.1", &sub1, "SIG001", 7, 0);
+            assert(g_queue.signal_available(sub1));
+            check_signal(g_queue, "1.1.1", sub1, "SIG001", 7, 0);
 
-            assert(g_queue->signal_available(&sub1));
-            check_signal(g_queue, "1.1.2", &sub1, "SIG002", 7, 0);
+            assert(g_queue.signal_available(sub1));
+            check_signal(g_queue, "1.1.2", sub1, "SIG002", 7, 0);
 
-            assert(!g_queue->signal_available(&sub1));
+            assert(!g_queue.signal_available(sub1));
 
-            assert(g_queue->signal_available(&sub2));
-            check_signal(g_queue, "1.1.1", &sub2, "SIG001", 7, 0);
+            assert(g_queue.signal_available(sub2));
+            check_signal(g_queue, "1.1.1", sub2, "SIG001", 7, 0);
 
-            assert(g_queue->signal_available(&sub2));
-            check_signal(g_queue, "1.1.2", &sub2, "SIG002", 7, 0);
+            assert(g_queue.signal_available(sub2));
+            check_signal(g_queue, "1.1.2", sub2, "SIG002", 7, 0);
 
-            assert(!g_queue->signal_available(&sub2));
+            assert(!g_queue.signal_available(sub2));
             SIGFS_LOG_INFO("PASS: 1.1");
 
 
@@ -368,16 +368,16 @@ int main(int argc,  char *const* argv)
             SIGFS_LOG_DEBUG("START: 1.2");
 
             // Add two additional signals and make sure that we can read them.
-            g_queue->queue_signal("SIG003", 7);
-            g_queue->queue_signal("SIG004", 7);
+            g_queue.queue_signal("SIG003", 7);
+            g_queue.queue_signal("SIG004", 7);
 
-            assert(g_queue->signal_available(&sub1));
-            check_signal(g_queue, "1.2.1", &sub1, "SIG003", 7, 0);
+            assert(g_queue.signal_available(sub1));
+            check_signal(g_queue, "1.2.1", sub1, "SIG003", 7, 0);
 
-            assert(g_queue->signal_available(&sub1));
-            check_signal(g_queue, "1.2.2", &sub1, "SIG004", 7, 0);
+            assert(g_queue.signal_available(sub1));
+            check_signal(g_queue, "1.2.2", sub1, "SIG004", 7, 0);
 
-            assert(!g_queue->signal_available(&sub1));
+            assert(!g_queue.signal_available(sub1));
 
             SIGFS_LOG_DEBUG("PASS: 1.2");
         }
@@ -387,21 +387,21 @@ int main(int argc,  char *const* argv)
             // Lost signals by overwrapping the queue
             //
             SIGFS_LOG_DEBUG("START: 1.3");
-            Subscriber sub(*g_queue);
-            g_queue->queue_signal("SIG005", 7);
-            g_queue->queue_signal("SIG006", 7);
-            g_queue->queue_signal("SIG007", 7);
-            g_queue->queue_signal("SIG008", 7);
-            g_queue->queue_signal("SIG009", 7);
-            g_queue->queue_signal("SIG010", 7);
+            Subscriber sub(g_queue);
+            g_queue.queue_signal("SIG005", 7);
+            g_queue.queue_signal("SIG006", 7);
+            g_queue.queue_signal("SIG007", 7);
+            g_queue.queue_signal("SIG008", 7);
+            g_queue.queue_signal("SIG009", 7);
+            g_queue.queue_signal("SIG010", 7);
             // Only the last three signals will be available.
 
-            check_signal(g_queue, "1.3.1", &sub, "SIG008", 7, 3);
-            assert(g_queue->signal_available(&sub));
-            check_signal(g_queue, "1.3.2", &sub, "SIG009", 7, 0);
-            assert(g_queue->signal_available(&sub));
-            check_signal(g_queue, "1.3.3", &sub, "SIG010", 7, 0);
-            assert(!g_queue->signal_available(&sub));
+            check_signal(g_queue, "1.3.1", sub, "SIG008", 7, 3);
+            assert(g_queue.signal_available(sub));
+            check_signal(g_queue, "1.3.2", sub, "SIG009", 7, 0);
+            assert(g_queue.signal_available(sub));
+            check_signal(g_queue, "1.3.3", sub, "SIG010", 7, 0);
+            assert(!g_queue.signal_available(sub));
             SIGFS_LOG_INFO("PASS: 1.3");
         }
         {
@@ -409,24 +409,24 @@ int main(int argc,  char *const* argv)
             // Double overwrap of queue
             //
             SIGFS_LOG_DEBUG("START: 1.4");
-            Subscriber sub1(*g_queue);
-            Subscriber sub2(*g_queue);
-            g_queue->queue_signal("SIG011", 7);
-            g_queue->queue_signal("SIG012", 7);
-            g_queue->queue_signal("SIG013", 7);
-            g_queue->queue_signal("SIG014", 7);
-            g_queue->queue_signal("SIG015", 7);
-            g_queue->queue_signal("SIG016", 7);
-            g_queue->queue_signal("SIG017", 7);
+            Subscriber sub1(g_queue);
+            Subscriber sub2(g_queue);
+            g_queue.queue_signal("SIG011", 7);
+            g_queue.queue_signal("SIG012", 7);
+            g_queue.queue_signal("SIG013", 7);
+            g_queue.queue_signal("SIG014", 7);
+            g_queue.queue_signal("SIG015", 7);
+            g_queue.queue_signal("SIG016", 7);
+            g_queue.queue_signal("SIG017", 7);
 
             // Check that we have the last three signals available.
-            assert(g_queue->signal_available(&sub1));
-            check_signal(g_queue, "1.4.1", &sub1, "SIG015", 7, 4);
-            assert(g_queue->signal_available(&sub1));
-            check_signal(g_queue, "1.4.2", &sub1, "SIG016", 7, 0);
-            assert(g_queue->signal_available(&sub1));
-            check_signal(g_queue, "1.4.3", &sub1, "SIG017", 7, 0);
-            assert(!g_queue->signal_available(&sub1));
+            assert(g_queue.signal_available(sub1));
+            check_signal(g_queue, "1.4.1", sub1, "SIG015", 7, 4);
+            assert(g_queue.signal_available(sub1));
+            check_signal(g_queue, "1.4.2", sub1, "SIG016", 7, 0);
+            assert(g_queue.signal_available(sub1));
+            check_signal(g_queue, "1.4.3", sub1, "SIG017", 7, 0);
+            assert(!g_queue.signal_available(sub1));
             SIGFS_LOG_INFO("PASS: 1.4");
 
 
@@ -436,19 +436,14 @@ int main(int argc,  char *const* argv)
             //  catch up even further after adding to more signals.
             //
             SIGFS_LOG_DEBUG("START: 1.5");
-            g_queue->queue_signal("SIG018", 7);
-            g_queue->queue_signal("SIG019", 7);
+            g_queue.queue_signal("SIG018", 7);
+            g_queue.queue_signal("SIG019", 7);
 
-            check_signal(g_queue, "1.5.1", &sub2, "SIG017", 7, 6);
-            check_signal(g_queue, "1.5.2", &sub2, "SIG018", 7, 0);
-            check_signal(g_queue, "1.5.3", &sub2, "SIG019", 7, 0);
+            check_signal(g_queue, "1.5.1", sub2, "SIG017", 7, 6);
+            check_signal(g_queue, "1.5.2", sub2, "SIG018", 7, 0);
+            check_signal(g_queue, "1.5.3", sub2, "SIG019", 7, 0);
             SIGFS_LOG_INFO("PASS: 1.5");
         }
-
-        //
-        // Free memory for a clean valgrind run
-        //
-        delete g_queue;
     }
 
     //
@@ -470,18 +465,19 @@ int main(int argc,  char *const* argv)
         // Make queue length fairly small to ensure wrapping.
         //
         SIGFS_LOG_DEBUG("START: 2.0");
-        Queue* g_queue{new Queue(2048)};
+        Queue g_queue(2048);
 
+        Subscriber sub1(g_queue);
         // // Create publisher thread A
         std::thread pub_thr_a (
-            [g_queue]() {
+            [&g_queue]() {
                 publish_signal_sequence("2.0.1", g_queue, 1, 1200);
             });
 
 
         // Create publisher thread B
         std::thread pub_thr_b (
-            [=]() {
+            [&g_queue]() {
                 publish_signal_sequence("2.0.2", g_queue, 2, 1200);
             });
 
@@ -491,20 +487,16 @@ int main(int argc,  char *const* argv)
         // the single subscriber.
         //
         const int prefixes[]= { 1, 2 };
-        Subscriber *sub1{new Subscriber(*g_queue)};
         check_signal_sequence("2.0.3", sub1, prefixes, 2, 2400);
 
         // Check that we got all signals and no more are ready to be read
-        assert(!g_queue->signal_available(sub1));
+        assert(!g_queue.signal_available(sub1));
 
         // Join threads.
         pub_thr_a.join();
         pub_thr_b.join();
 
         SIGFS_LOG_INFO("PASS: 2.0");
-
-        delete sub1;
-        delete g_queue;
     }
 
     // TEST 2.1 - Two publishers, three subscribers.
@@ -513,33 +505,33 @@ int main(int argc,  char *const* argv)
     // then pump two separate sequence of signals as fast as they can.
     // Have a single subscriber check for signal consistency
     {
-        Queue* g_queue(new Queue(131072));
-        Subscriber* sub1(new Subscriber(*g_queue));
-        Subscriber* sub2(new Subscriber(*g_queue));
+        Queue g_queue(131072);
+        Subscriber sub1(g_queue);
+        Subscriber sub2(g_queue);
         const int prefixes[]= { 1,2 };
 
         // Create subscriber thread 1
         std::thread sub_thr_1 (
-            [g_queue, sub1, prefixes]() {
+            [&g_queue, &sub1, prefixes]() {
                 check_signal_sequence("2.1.3", sub1, prefixes, 2, 200000);
             });
 
         // Create subscriber thread 2
         std::thread sub_thr_2 (
-            [g_queue, sub2, prefixes]() {
+            [&g_queue, &sub2, prefixes]() {
                 check_signal_sequence("2.1.4", sub2, prefixes, 2, 200000);
             });
 
         // Create publisher thread a
         std::thread pub_thr_a (
-            [g_queue]() {
+            [&g_queue]() {
                 publish_signal_sequence("2.1.1", g_queue, 1, 100000);
             });
 
 
         // Create publisher thread b
         std::thread pub_thr_b (
-            [g_queue]() {
+            [&g_queue]() {
                 publish_signal_sequence("2.1.2", g_queue, 2, 100000);
             });
 
@@ -551,10 +543,6 @@ int main(int argc,  char *const* argv)
         sub_thr_1.join();
         sub_thr_2.join();
 
-        // Clean up for a clean valgrind run.
-        delete sub1;
-        delete sub2;
-        delete g_queue;
         SIGFS_LOG_INFO("PASS: 2.1");
     }
     usec_timestamp_t done = sigfs_usec_since_start();

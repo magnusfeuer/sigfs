@@ -14,12 +14,12 @@
 
 namespace sigfs {
     template<typename CallbackT>
-    void Queue::dequeue_signal(Subscriber* sub,
+    void Queue::dequeue_signal(Subscriber& sub,
                                CallbackT userdata,
                                signal_callback_t<CallbackT>& cb) const
     {
 
-        SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Called", sub->sig_id());
+        SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): Called", sub.sig_id());
 
         // Have we lost signals?
         // We have the sig_id of currently stored signal in queue[index(sub->sig_id())].sig_id()
@@ -48,23 +48,23 @@ namespace sigfs {
                 //
                 // Are we interrupted?
                 //
-                if (sub->is_interrupted())
+                if (sub.is_interrupted())
                     return true;
 
                 //
                 // If current id < next id, then we are still waiting for
                 // a new signal to arrive. Continue waiting
                 //
-                if (self.head() == self.tail() || self.queue_[self.index(sub->sig_id())].sig_id() < sub->sig_id()) {
-                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                                          "dequeue_signal(): head(%lu) %s tail(%lu) --- self.queue_[self.index(sub->sig_id(%u))].sig_id(%lu) - sub->sig_id(%lu) = %ld -> Do not exit wait",
+                if (self.head() == self.tail() || self.queue_[self.index(sub.sig_id())].sig_id() < sub.sig_id()) {
+                    SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
+                                          "dequeue_signal(): head(%lu) %s tail(%lu) --- self.queue_[self.index(sub.sig_id(%u))].sig_id(%lu) - sub.sig_id(%lu) = %ld -> Do not exit wait",
                                           self.head(),
                                           ((self.head() == self.tail())?"==":"!="),
                                           self.tail(),
-                                          sub->sig_id(),
-                                          self.queue_[self.index(sub->sig_id())].sig_id(),
-                                          sub->sig_id(),
-                                          (self.queue_[self.index(sub->sig_id())].sig_id() - sub->sig_id()));
+                                          sub.sig_id(),
+                                          self.queue_[self.index(sub.sig_id())].sig_id(),
+                                          sub.sig_id(),
+                                          (self.queue_[self.index(sub.sig_id())].sig_id() - sub.sig_id()));
                     return false;
                 }
 
@@ -75,28 +75,28 @@ namespace sigfs {
                 //
                 // In either case, exit conditional wait.
                 //
-                SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                                      "dequeue_signal(): head(%lu) %s tail(%lu) --- self.queue_[self.index(sub->sig_id(%u))].sig_id(%lu) - sub->sig_id(%lu) = %ld -> Exit wait",
+                SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
+                                      "dequeue_signal(): head(%lu) %s tail(%lu) --- self.queue_[self.index(sub.sig_id(%u))].sig_id(%lu) - sub.sig_id(%lu) = %ld -> Exit wait",
                                       self.head(),
                                       ((self.head() == self.tail())?"==":"!="),
                                       self.tail(),
-                                      sub->sig_id(),
-                                      self.queue_[self.index(sub->sig_id())].sig_id(),
-                                      sub->sig_id(),
-                                      (self.queue_[self.index(sub->sig_id())].sig_id() - sub->sig_id()));
+                                      sub.sig_id(),
+                                      self.queue_[self.index(sub.sig_id())].sig_id(),
+                                      sub.sig_id(),
+                                      (self.queue_[self.index(sub.sig_id())].sig_id() - sub.sig_id()));
 
                 return true;
             };
 
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Lock acquired", sub->sig_id());
+            SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): Lock acquired", sub.sig_id());
 
             // Wait for condition to be fulfilled.
             cond_.wait(lock, check);
 
             // Were we interrupted?
-            if (sub->is_interrupted()) {
+            if (sub.is_interrupted()) {
                 cb( userdata, 0, 0, 0, 0);
                 return;
             }
@@ -104,24 +104,24 @@ namespace sigfs {
 
             //
             // If the ID of the oldest signal in the queue (tail()) is
-            // greater than the next signal we expect to read (sub->sig_id()), then
+            // greater than the next signal we expect to read (sub.sig_id()), then
             // we have lost signals
             //
             // Update subscriber's sig_id to the oldest signal in the queue.
             //
-            if (self.queue_[tail()].sig_id() > sub->sig_id()) {
-                SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
+            if (self.queue_[tail()].sig_id() > sub.sig_id()) {
+                SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
                                       "dequeue_signal(): Tail catchup for [%lu] lost signals [%lu]->[%lu]",
-                                      queue_[tail()].sig_id() - sub->sig_id(),
-                                      sub->sig_id(),
+                                      queue_[tail()].sig_id() - sub.sig_id(),
+                                      sub.sig_id(),
                                       queue_[tail()].sig_id());
                 //
-                // sub->sig_id() is for the next signal we are expecting.
+                // sub.sig_id() is for the next signal we are expecting.
                 // queue_[tail()].sig_id() is the signal currently stored in the queue slot
                 // we are about to read the signal from.
                 //
-                lost_signal_count = self.queue_[tail()].sig_id() - sub->sig_id();
-                sub->set_sig_id(tail_sig_id_());
+                lost_signal_count = self.queue_[tail()].sig_id() - sub.sig_id();
+                sub.set_sig_id(tail_sig_id_());
             }
 
             //
@@ -137,16 +137,16 @@ namespace sigfs {
             // We could do recursive locks and lock it one extra time, but that
             // is a slower mutex and implementation in a very critical code path.
             //
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Doing callback with %lu bytes.",
-                                  queue_[index(sub->sig_id())].payload()->payload_size);
+            SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): Doing callback with %lu bytes.",
+                                  queue_[index(sub.sig_id())].payload()->payload_size);
             cb( userdata,
-                sub->sig_id(),
-                queue_[index(sub->sig_id())].payload()->payload,
-                queue_[index(sub->sig_id())].payload()->payload_size,
+                sub.sig_id(),
+                queue_[index(sub.sig_id())].payload()->payload,
+                queue_[index(sub.sig_id())].payload()->payload_size,
                 lost_signal_count);
 
             // Bump signal id in preparation for the next signal.
-            sub->set_sig_id(sub->sig_id() + 1);
+            sub.set_sig_id(sub.sig_id() + 1);
 
             //
             // Decrease active subscribers and check if there are no other subscribers waiting.
