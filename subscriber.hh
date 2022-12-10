@@ -32,6 +32,7 @@ namespace sigfs {
 
             std::lock_guard<std::mutex> lock(mutex_);
             sub_id_ = next_sub_id++;
+            queue_.initialize_subscriber(*this);
         };
 
         inline const int sub_id(void) const
@@ -70,6 +71,10 @@ namespace sigfs {
             interrupted_ = interrupted;
         }
 
+        const bool signal_available(void) const
+        {
+            return queue_.signal_available(this);
+        }
 
 
     private:

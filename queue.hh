@@ -76,6 +76,7 @@ namespace sigfs {
             return tail_sig_id_();
         }
 
+        void initialize_subscriber(Subscriber& sub) const;
 
     private:
 

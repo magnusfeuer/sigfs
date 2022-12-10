@@ -92,13 +92,6 @@ namespace sigfs {
             std::unique_lock<std::mutex> lock(mutex_);
             SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Lock acquired", sub->sig_id());
 
-            //
-            // If this is the first call of subscriber, then initialize
-            // it to the next signal we are about to read.
-            //
-            if (sub->sig_id() == 0)
-                sub->set_sig_id(next_sig_id_);
-
             // Wait for condition to be fulfilled.
             cond_.wait(lock, check);
 

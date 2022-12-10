@@ -35,7 +35,12 @@ void usage(const char* name)
     std::cout << "        -s <usec> | --sleep=<usec>" << std::endl;
 }
 
-void check_signal(sigfs::Queue* queue, const char* prefix, sigfs::Subscriber* sub, const char* wanted_data, int wanted_res, int wanted_lost_signals)
+void check_signal(sigfs::Queue* queue,
+                  const char* prefix,
+                  sigfs::Subscriber* sub,
+                  const char* wanted_data,
+                  int wanted_res,
+                  int wanted_lost_signals)
 {
     char buf[1024];
 
@@ -69,7 +74,6 @@ void check_signal(sigfs::Queue* queue, const char* prefix, sigfs::Subscriber* su
         };
 
     queue->dequeue_signal<void*>(sub, 0, cb);
-
 }
 
 
@@ -126,10 +130,10 @@ void check_signal_sequence(const char* test_id,
                     exit(0);
                 }
 
-                for(std::uint32_t ind = 0; ind < payload_size; ++ind) {
-                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                                          "%s: Byte %d: %.2X", test_id, ind, (char) payload[ind]);
-                }
+                // for(std::uint32_t ind = 0; ind < payload_size; ++ind) {
+                //     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
+                //                           "%s: Byte %d: %.2X", test_id, ind, (char) payload[ind]);
+                // }
                 // Find correct prefix
                 for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
                     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
@@ -315,93 +319,136 @@ int main(int argc,  char *const* argv)
         //
 
         Queue* g_queue(new Queue(4));
-        Subscriber *sub1{new Subscriber(*g_queue)};
-        Subscriber *sub2{new Subscriber(*g_queue)};
-        SIGFS_LOG_DEBUG("START: 1.0");
-        validate_signal(g_queue, 1, "1.0.1", "SIG000", 0);
-        SIGFS_LOG_INFO("PASS: 1.0");
+
+        {
+            SIGFS_LOG_DEBUG("START: 1.0");
+            Subscriber sub(*g_queue);
+            g_queue->queue_signal("SIG001", 7);
+
+            assert(g_queue->signal_available(&sub));
+            check_signal(g_queue, "1.0.1", &sub, "SIG001", 7, 0);
+            assert(!g_queue->signal_available(&sub));
+
+            SIGFS_LOG_INFO("PASS: 1.0");
+        }
+
+        {
+
+            // TEST 1.1
+            // Two signals published, two signals read
+            //
+            SIGFS_LOG_DEBUG("START: 1.1");
+            Subscriber sub1(*g_queue);
+            Subscriber sub2(*g_queue);
+
+            g_queue->queue_signal("SIG001", 7);
+            g_queue->queue_signal("SIG002", 7);
+
+            assert(g_queue->signal_available(&sub1));
+            check_signal(g_queue, "1.1.1", &sub1, "SIG001", 7, 0);
+
+            assert(g_queue->signal_available(&sub1));
+            check_signal(g_queue, "1.1.2", &sub1, "SIG002", 7, 0);
+
+            assert(!g_queue->signal_available(&sub1));
+
+            assert(g_queue->signal_available(&sub2));
+            check_signal(g_queue, "1.1.1", &sub2, "SIG001", 7, 0);
+
+            assert(g_queue->signal_available(&sub2));
+            check_signal(g_queue, "1.1.2", &sub2, "SIG002", 7, 0);
+
+            assert(!g_queue->signal_available(&sub2));
+            SIGFS_LOG_INFO("PASS: 1.1");
 
 
-        // TEST 1.1
-        // Two signals published, two signals read
-        //
-        SIGFS_LOG_DEBUG("START: 1.1");
-        g_queue->queue_signal("SIG001", 7);
-        g_queue->queue_signal("SIG002", 7);
+            // TEST 1.1
+            // Add two more signals and ensure that we can read them.
+            //
+            SIGFS_LOG_DEBUG("START: 1.2");
 
-        check_signal(g_queue, "1.1.1", sub1, "SIG001", 7, 0);
-        check_signal(g_queue, "1.1.2", sub1, "SIG002", 7, 0);
+            // Add two additional signals and make sure that we can read them.
+            g_queue->queue_signal("SIG003", 7);
+            g_queue->queue_signal("SIG004", 7);
 
-        SIGFS_LOG_INFO("PASS: 1.1");
+            assert(g_queue->signal_available(&sub1));
+            check_signal(g_queue, "1.2.1", &sub1, "SIG003", 7, 0);
 
-        // TEST 1.2
-        // Test blocking functionality
+            assert(g_queue->signal_available(&sub1));
+            check_signal(g_queue, "1.2.2", &sub1, "SIG004", 7, 0);
 
-        SIGFS_LOG_DEBUG("START: 1.2");
+            assert(!g_queue->signal_available(&sub1));
 
-        // Check that sub1, which have read all signals up to and
-        // including SIG002, has no more signals
-        assert(!g_queue->signal_available(sub1));
+            SIGFS_LOG_DEBUG("PASS: 1.2");
+        }
 
-        // Check that sub2, which still has SIG001 and SIG002 to read,
-        // has signals available
-        //
-        assert(g_queue->signal_available(sub2));
-        check_signal(g_queue, "1.2.1", sub2, "SIG001", 7, 0);
-        assert(g_queue->signal_available(sub2));
-        check_signal(g_queue, "1.2.2", sub2, "SIG002", 7, 0);
-        assert(!g_queue->signal_available(sub2));
+        {
+            // TEST 1.3
+            // Lost signals by overwrapping the queue
+            //
+            SIGFS_LOG_DEBUG("START: 1.3");
+            Subscriber sub(*g_queue);
+            g_queue->queue_signal("SIG005", 7);
+            g_queue->queue_signal("SIG006", 7);
+            g_queue->queue_signal("SIG007", 7);
+            g_queue->queue_signal("SIG008", 7);
+            g_queue->queue_signal("SIG009", 7);
+            g_queue->queue_signal("SIG010", 7);
+            // Only the last three signals will be available.
+
+            check_signal(g_queue, "1.3.1", &sub, "SIG008", 7, 3);
+            assert(g_queue->signal_available(&sub));
+            check_signal(g_queue, "1.3.2", &sub, "SIG009", 7, 0);
+            assert(g_queue->signal_available(&sub));
+            check_signal(g_queue, "1.3.3", &sub, "SIG010", 7, 0);
+            assert(!g_queue->signal_available(&sub));
+            SIGFS_LOG_INFO("PASS: 1.3");
+        }
+        {
+            // TEST 1.4
+            // Double overwrap of queue
+            //
+            SIGFS_LOG_DEBUG("START: 1.4");
+            Subscriber sub1(*g_queue);
+            Subscriber sub2(*g_queue);
+            g_queue->queue_signal("SIG011", 7);
+            g_queue->queue_signal("SIG012", 7);
+            g_queue->queue_signal("SIG013", 7);
+            g_queue->queue_signal("SIG014", 7);
+            g_queue->queue_signal("SIG015", 7);
+            g_queue->queue_signal("SIG016", 7);
+            g_queue->queue_signal("SIG017", 7);
+
+            // Check that we have the last three signals available.
+            assert(g_queue->signal_available(&sub1));
+            check_signal(g_queue, "1.4.1", &sub1, "SIG015", 7, 4);
+            assert(g_queue->signal_available(&sub1));
+            check_signal(g_queue, "1.4.2", &sub1, "SIG016", 7, 0);
+            assert(g_queue->signal_available(&sub1));
+            check_signal(g_queue, "1.4.3", &sub1, "SIG017", 7, 0);
+            assert(!g_queue->signal_available(&sub1));
+            SIGFS_LOG_INFO("PASS: 1.4");
 
 
-        // TEST 1.3
-        // Lost signals by overflowing the queue
-        //
-        SIGFS_LOG_DEBUG("START: 1.3");
-        g_queue->queue_signal("SIG003", 7);
-        g_queue->queue_signal("SIG004", 7);
-        g_queue->queue_signal("SIG005", 7);
-        g_queue->queue_signal("SIG006", 7);
-        g_queue->queue_signal("SIG007", 7);
-        g_queue->queue_signal("SIG008", 7);
-        check_signal(g_queue, "1.3.1", sub1, "SIG006", 7, 3);
-        check_signal(g_queue, "1.3.2", sub1, "SIG007", 7, 0);
-        check_signal(g_queue, "1.3.3", sub1, "SIG008", 7, 0);
-        SIGFS_LOG_INFO("PASS: 1.3");
 
-        // TEST 1.4
-        // Double overwrap of queue
-        //
-        SIGFS_LOG_DEBUG("START: 1.4");
-        g_queue->queue_signal("SIG009", 7);
-        g_queue->queue_signal("SIG010", 7);
-        g_queue->queue_signal("SIG011", 7);
-        g_queue->queue_signal("SIG012", 7);
-        g_queue->queue_signal("SIG013", 7);
-        g_queue->queue_signal("SIG014", 7);
-        g_queue->queue_signal("SIG015", 7);
-        g_queue->queue_signal("SIG016", 7);
-        g_queue->queue_signal("SIG017", 7);
+            // 1.5
+            //  Have second subscriber, who has read no signals,
+            //  catch up even further after adding to more signals.
+            //
+            SIGFS_LOG_DEBUG("START: 1.5");
+            g_queue->queue_signal("SIG018", 7);
+            g_queue->queue_signal("SIG019", 7);
 
-        check_signal(g_queue, "1.4.1", sub1, "SIG015", 7, 6);
-        check_signal(g_queue, "1.4.2", sub1, "SIG016", 7, 0);
-        check_signal(g_queue, "1.4.3", sub1, "SIG017", 7, 0);
-        SIGFS_LOG_INFO("PASS: 1.4");
-
-        // 1.5
-        //  Have second subscriber, who only read one signal, catch up
-        //
-        SIGFS_LOG_DEBUG("START: 1.5");
-        check_signal(g_queue, "1.5.1", sub2, "SIG015", 7, 12);
-        check_signal(g_queue, "1.5.2", sub2, "SIG016", 7, 0);
-        check_signal(g_queue, "1.5.3", sub2, "SIG017", 7, 0);
-        SIGFS_LOG_INFO("PASS: 1.5");
+            check_signal(g_queue, "1.5.1", &sub2, "SIG017", 7, 6);
+            check_signal(g_queue, "1.5.2", &sub2, "SIG018", 7, 0);
+            check_signal(g_queue, "1.5.3", &sub2, "SIG019", 7, 0);
+            SIGFS_LOG_INFO("PASS: 1.5");
+        }
 
         //
         // Free memory for a clean valgrind run
         //
         delete g_queue;
-        delete sub1;
-        delete sub2;
     }
 
     //

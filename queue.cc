@@ -62,7 +62,17 @@ void Queue::dump(const char* prefix, const Subscriber* sub)
         if (strlen(suffix) == 4)
             suffix[0] = 0;
 
-        SIGFS_LOG_DEBUG("%s: [%d] SigID[%lu] [%-*s]%s ", prefix, ind, queue_[ind].sig_id(), queue_[ind].payload()->payload_size, queue_[ind].payload()->payload, suffix);
+        if (queue_[ind].payload()) {
+            SIGFS_LOG_DEBUG("%s: [%d] SigID[%lu] Sz[%d] [%-*s]%s ",
+                            prefix,
+                            ind,
+                            queue_[ind].sig_id(),
+                            queue_[ind].payload()->payload_size,
+                            queue_[ind].payload()->payload_size,
+                            queue_[ind].payload()->payload, suffix);
+        } else {
+            SIGFS_LOG_DEBUG("%s: [%d] SigID[%lu] Sz[0] [---]%s ", prefix, ind, queue_[ind].sig_id(), suffix);
+        }
         ++ind;
     }
 #endif
@@ -181,4 +191,9 @@ void Queue::interrupt_dequeue(Subscriber * sub)
     // if their interrupt flag is set.
     //
     cond_.notify_all();
+}
+
+void Queue::initialize_subscriber(Subscriber& sub) const
+{
+    sub.set_sig_id(next_sig_id_);
 }
