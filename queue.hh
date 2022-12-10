@@ -8,7 +8,7 @@
 
 #ifndef __SIGFS_QUEUE__
 #define __SIGFS_QUEUE__
-#include "sigfs_common.hh"
+#include "sigfs_common.h"
 #include <functional>
 #include <mutex>
 #include <condition_variable>
@@ -31,12 +31,49 @@ namespace sigfs {
             char payload[];
         } payload_t;
 
+        using cb_result_t = enum {
+            // Callback can be invoked again by the dequeue_signal()
+            // if there are more signals immediately available to deliver.
+            //
+            processed_call_again = 0,
+
+            // Callback cannot be invoked again until dequeue_signal()
+            // has returned and been invoked again.
+            //
+            processed_dont_call_again = 1,
+
+            // Callback failed to process signal, do not call back, do not discard signal.
+            // Any subsequent call to dequeue_signal() will deliver the same signal again.
+            //
+            not_processed = 2
+        };
+
+        // Callback invoked by dequeue_signal() with locked and protected payload.
+        // This callbackl is invoked one or more times by
+        // dequeue_signal() in order to deliver the next signal in the
+        // queue for the subscriber provided to dequeue_signal().
+        // The following argbuments are provided
+        //
+        // userdata - Same argument as provided to dequeue_signal().
+        // signal_id - Unique ID for the signal, will never be repeated for the lifespan of self.
+        // payload - The signal payload data.
+        // payload_size - The number of bytes in payload
+        // lost_signals - The number of signals that were lost between the last call to dequeue_signal() and this call.
+        // remaining_signal_count - The number of remaining signals ready to be processed once the callback returns.
+        //
+        // If the callback returns true, it means that the dequeue_signal() that invoked the callback is
+        // free to do so again in order to deliver additional signals that are ready to be processed.
+        //
+        // If the callback returns false, dequeue_signal() will itself return, and its caller will have
+        // to call dequeue_signal() again in order to process additional signals.
+        //
         template<typename T>
-        using signal_callback_t = std::function<void(T userdata,
-                                                     signal_id_t signal_id,
-                                                     const char* payload,
-                                                     std::uint32_t payload_size,
-                                                     sigfs::signal_count_t lost_signals)>;
+        using signal_callback_t = std::function<cb_result_t(T userdata,
+                                                            signal_id_t signal_id,
+                                                            const char* payload,
+                                                            std::uint32_t payload_size,
+                                                            signal_count_t lost_signals,
+                                                            signal_count_t remaining_signal_count)>;
 
 
         // length has to be a power of 2:
@@ -51,6 +88,19 @@ namespace sigfs {
         //
         // Retrieve the data of the next signal for us to read.
         //
+        // For each signal processed, the cb callback will be invoked.
+        // If cb returns true, and there are additional signals to be processed,
+        // cb will be called again until either there are no more signals or
+        // cb returns false.
+        //
+        // Having cb called multiple times speeds up processing since all callbacks
+        // are done with the relevant resoruces mutex-locked only once at the beginning
+        // of the dequeue_signal() call.
+        //
+        // If not singal is available, this method will block until
+        // another thread calls queue_signal().
+        //
+        // See below for instructions on how to interrupt this call.
         //
         template<typename CallbackT=void*>
         void dequeue_signal(Subscriber& sub,
@@ -58,11 +108,24 @@ namespace sigfs {
                             signal_callback_t<CallbackT>& cb) const;
 
         //
-        // Interrupt an ongoing dequeue_signal() call that is blockign
+        // Interrupt an ongoing dequeue_signal() call that is
+        // blocking.
+        //
+        // This will cause all threads currently blocking on
+        // dequeue_signal() to invoke cb with the payload argumentset
+        // to NULL and payload_size set to 0. After cb returns,
+        // dequeue_signal() will return.
+        //
+        // cb will only be called once to deliver the interrupt
+        // notification, even if the single_callback argument to
+        // dequeue_signal() is set to false.
         //
         void interrupt_dequeue(Subscriber& sub);
 
-        const bool signal_available(const Subscriber& sub) const;
+        // Return the number of signals available through
+        // dequeue_signal() calls.
+        //
+        const signal_count_t signal_available(const Subscriber& sub) const;
 
 
         inline index_t queue_length(void) const {
@@ -133,6 +196,9 @@ namespace sigfs {
            return tail_;
         }
 
+        // Not thread safe.
+        const bool signal_available_(const Subscriber& sub) const;
+
     private:
 
         class Signal {
@@ -172,7 +238,7 @@ namespace sigfs {
             inline void set(const id_t sig_id, const char* payload, const size_t payload_size)
             {
                 // First time allocation?
-                if (payload_size + sizeof(signal_t) > payload_alloc_) {
+                if (payload_size + sizeof(sigfs_signal_t) > payload_alloc_) {
                     if (payload_)
                         delete[] (char*) payload_;
 

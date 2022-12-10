@@ -32,4 +32,7 @@
 *.app
 test/sigfs_test_queue
 test/sigfs_test_speed
+test/sigfs_test_fuse
+sigfs_publish
+sigfs_subscribe
 sigfs

@@ -4,10 +4,11 @@
 
 .PHONY: all clean install uninstall test install_test 
 
-HDR=queue.hh subscriber.hh sigfs_common.hh log.h queue_impl.hh
+HDR=queue.hh subscriber.hh sigfs_common.h log.h queue_impl.hh
 
 
-INCLUDES=-I/usr/local/include
+# INCLUDES=$(shell pkg-config fuse3 --cflags)
+INCLUDES=-I ./libfuse/build/include
 
 COMMON_SRC=log.cc queue.cc
 COMMON_OBJ=${patsubst %.cc, %.o, ${COMMON_SRC}}
@@ -47,12 +48,20 @@ SIGFS_TEST_SPEED_SRC=test/sigfs_test_speed.cc
 SIGFS_TEST_SPEED_OBJ=${patsubst %.cc, %.o, ${SIGFS_TEST_SPEED_SRC}}
 SIGFS_TEST_SPEED=./test/sigfs_test_speed
 
+#
+# Signal test queue
+#
+SIGFS_TEST_FUSE_SRC=test/sigfs_test_fuse.cc
+SIGFS_TEST_FUSE_OBJ=${patsubst %.cc, %.o, ${SIGFS_TEST_FUSE_SRC}}
+SIGFS_TEST_FUSE=./test/sigfs_test_fuse
+
 
 DESTDIR ?= /usr/local
 export DESTDIR
 
 
-debug: CXXFLAGS ?=-DSIGFS_LOG -ggdb ${INCLUDES} -std=c++17 -Wall -pthread
+debug: CXXFLAGS ?=-DSIGFS_LOG -ggdb  ${INCLUDES} -std=c++17 -Wall -pthread # -pg
+# debug: CXXFLAGS ?=-ggdb  ${INCLUDES} -std=c++17 -Wall -pthread # -pg
 CXXFLAGS ?=-O3 ${INCLUDES} -std=c++17 -Wall -pthread 
 
 #
@@ -84,16 +93,25 @@ ${SIGFS_SUBSCRIBE_OBJ}: ${HDR}
 #
 # Test 
 #
-${SIGFS_TEST_QUEUE}: ${SIGFS_TEST_QUEUE_OBJ} ${COMMON_OBJ}
+
+${SIGFS_TEST_QUEUE}: ${COMMON_OBJ} ${SIGFS_TEST_QUEUE_OBJ} 
 	${CXX} -o ${SIGFS_TEST_QUEUE} ${SIGFS_TEST_QUEUE_OBJ} ${COMMON_OBJ} ${CXXFLAGS} 
 
 ${SIGFS_TEST_QUEUE_OBJ}: ${HDR}
 
-${SIGFS_TEST_SPEED}: ${SIGFS_TEST_SPEED_OBJ} ${COMMON_OBJ}
+# Test speed
+${SIGFS_TEST_SPEED}: ${COMMON_OBJ} ${SIGFS_TEST_SPEED_OBJ} 
 	${CXX} -o ${SIGFS_TEST_SPEED} ${SIGFS_TEST_SPEED_OBJ} ${COMMON_OBJ} ${CXXFLAGS} 
 
 ${SIGFS_TEST_SPEED_OBJ}: ${HDR}
 
+#
+# Test FUSE
+#
+${SIGFS_TEST_FUSE}: ${COMMON_OBJ} ${SIGFS_TEST_FUSE_OBJ} 
+	${CXX} -o ${SIGFS_TEST_FUSE} ${SIGFS_TEST_FUSE_OBJ} ${COMMON_OBJ} ${CXXFLAGS} 
+
+${SIGFS_TEST_FUSE_OBJ}: ${HDR}
 
 #
 #	Remove all the generated files in this project.  Note that this does NOT
@@ -105,11 +123,15 @@ clean:
 		${SIGFS_SUBSCRIBE_OBJ} \
 		${SIGFS_TEST_QUEUE_OBJ} \
 		${SIGFS_TEST_SPEED_OBJ} \
+		${SIGFS_TEST_FUSE_OBJ} \
 		${SIGFS_OBJ} \
 		${COMMON_OBJ} \
 		${SIGFS} \
 		${SIGFS_PUBLISH} \
 		${SIGFS_SUBSCRIBE} \
+		${SIGFS_TEST_QUEUE} \
+		${SIGFS_TEST_SPEED} \
+		${SIGFS_TEST_FUSE} \
 		*~ 
 
 
@@ -134,7 +156,7 @@ uninstall:
 #
 # Build tests only
 #
-test:	${SIGFS_TEST_SPEED} ${SIGFS_TEST_QUEUE}
+test:	${SIGFS_TEST_SPEED} ${SIGFS_TEST_QUEUE} ${SIGFS_TEST_FUSE}
 
 
 #
@@ -143,4 +165,5 @@ test:	${SIGFS_TEST_SPEED} ${SIGFS_TEST_QUEUE}
 install_test:
 	install -d ${DESTDIR}/bin; \
 	install -m 0755 ${SIGFS_TEST_QUEUE} ${DESTDIR}/bin; 
+	install -m 0755 ${SIGFS_TEST_FUSE} ${DESTDIR}/bin; 
 	install -m 0755 ${SIGFS_TEST_SPEED} ${DESTDIR}/bin; 

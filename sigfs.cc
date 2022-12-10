@@ -8,7 +8,7 @@
 
 // Need this in order not to trigger an error in fuse_common.h
 
-#define FUSE_USE_VERSION 32
+#define FUSE_USE_VERSION 39
 
 #include <fuse3/fuse_lowlevel.h>
 #include <stdio.h>
@@ -20,14 +20,37 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
-
 #include "log.h"
 #include "queue_impl.hh"
 #include "subscriber.hh"
+#include <limits.h>
 
 using namespace sigfs;
 
 Queue* g_queue(0);
+
+
+static int check_fuse_call(int index, int fuse_result, const char* fmt, ...)
+{
+#ifndef SIGFS_LOG
+    (void) index;
+    (void) fmt;
+    return fuse_result;
+#endif
+
+    if (!fuse_result)
+        return 0;
+
+    char buf[512];
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsprintf(buf, fmt, ap);
+    strcat(buf, strerror(-fuse_result));
+    va_end(ap);
+    SIGFS_LOG_INDEX_ERROR(index, buf);
+    return fuse_result;
+}
 
 
 static void print_file_info(const char* prefix, struct fuse_file_info* fi)
@@ -75,7 +98,7 @@ static void do_init(void* userdata, struct fuse_conn_info* conn)
     (void) userdata;
     (void) conn;
 
-    SIGFS_LOG_DEBUG("INIT");
+    SIGFS_LOG_DEBUG("do_init(): Called");
 
     return;
 }
@@ -91,19 +114,25 @@ static void do_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
 {
 	struct fuse_entry_param e;
 
-        printf("Lookup called: %s\n", name);
-	if (parent != 1 || strcmp(name, "signal") != 0)
-		fuse_reply_err(req, ENOENT);
+        SIGFS_LOG_DEBUG("do_lookup(): %s", name);
+	if (parent != 1 || strcmp(name, "signal") != 0) {
+            check_fuse_call(SIGFS_NIL_INDEX,
+                            fuse_reply_err(req, ENOENT),
+                            "do_lookup(): fuse_reply_err(req, ENOENT) returned: ");
+        }
 	else {
-		memset(&e, 0, sizeof(e));
-		e.ino = 2;
-		e.attr_timeout = 1.0;
-		e.entry_timeout = 1.0;
-                e.attr.st_mode = S_IFREG | 0644;
-                e.attr.st_nlink = 1;
+            memset(&e, 0, sizeof(e));
+            e.ino = 2;
+            e.attr_timeout = 1.0;
+            e.entry_timeout = 1.0;
+            e.attr.st_mode = S_IFREG | 0644;
+            e.attr.st_nlink = 1;
 
 
-		fuse_reply_entry(req, &e);
+            check_fuse_call(SIGFS_NIL_INDEX,
+                            fuse_reply_entry(req, &e),
+                            "do_lookup(): fuse_reply_entry() returned: ");
+
 	}
 }
 
@@ -133,14 +162,16 @@ static void do_getattr(fuse_req_t req, fuse_ino_t ino,
         break;
 
     default:
-        fuse_reply_err(req, ENOENT);
+        check_fuse_call(SIGFS_NIL_INDEX,
+                        fuse_reply_err(req, ENOENT),
+                        "do_getattr(): fuse_reply_err(ENOENT) returned: ");
         return;
     }
 
 
-    SIGFS_LOG_DEBUG( "do_getattr(%lu): Before" , ino);
-    fuse_reply_attr(req, &st, 1.0); // No idea about a good timeout value
-    SIGFS_LOG_DEBUG( "do_getattr(%lu): After" , ino);
+    check_fuse_call(SIGFS_NIL_INDEX,
+                    fuse_reply_attr(req, &st, 1.0), // No idea about a good timeout value
+                    "do_getattr(): fuse_reply_attr(ENOENT) returned: ");
 
     SIGFS_LOG_DEBUG("do_getattr(): Inode [%lu] not supported. Return ENOENT", ino);
     return;
@@ -161,13 +192,18 @@ static int reply_buf_limited(fuse_req_t req, const char *buf, size_t bufsize,
 			     off_t off, size_t maxsize)
 {
     if ((size_t) off < bufsize) {
-        SIGFS_LOG_DEBUG("reply_buf_limited(): LT");
-        return fuse_reply_buf(req, buf + off,
-                              min(bufsize - off, maxsize));
+        //SIGFS_LOG_DEBUG("reply_buf_limited(): LT");
+        return check_fuse_call(SIGFS_NIL_INDEX,
+                               fuse_reply_buf(req, buf + off, min(bufsize - off, maxsize)),
+                               "reply_buf_limited(): fuse_reply_buf(%d bytes) returned: ",
+                               min(bufsize - off, maxsize));
     }
 
-    SIGFS_LOG_DEBUG("reply_buf_limited(): GTE");
-    return fuse_reply_buf(req, NULL, 0);
+//    SIGFS_LOG_DEBUG("reply_buf_limited(): GTE");
+    return check_fuse_call(SIGFS_NIL_INDEX,
+                           fuse_reply_buf(req, NULL, 0),
+                           "reply_buf_limited(): fuse_reply_buf(nil) returned: ");
+
 }
 
 static void dirbuf_add(fuse_req_t req, struct dirbuf *b, const char *name, fuse_ino_t ino)
@@ -184,7 +220,7 @@ static void dirbuf_add(fuse_req_t req, struct dirbuf *b, const char *name, fuse_
 static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
                       off_t off, struct fuse_file_info *fi)
 {
-    SIGFS_LOG_DEBUG("do_readdir(): Called.");
+//    SIGFS_LOG_DEBUG("do_readdir(): Called.");
     (void) fi;
     if (ino != 1) {
         fuse_reply_err(req, ENOTDIR);
@@ -196,7 +232,10 @@ static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
     dirbuf_add(req, &b, ".", 1);
     dirbuf_add(req, &b, "..", 1);
     dirbuf_add(req, &b, "signal", 2);
-    reply_buf_limited(req, b.p, b.size, off, size);
+    check_fuse_call(SIGFS_NIL_INDEX,
+                    reply_buf_limited(req, b.p, b.size, off, size),
+                    "do_readdir(): reply_buf_limited() returned: ");
+
     SIGFS_LOG_DEBUG("do_readdir(): Returning root entry \"signal\".");
 
     free(b.p);
@@ -223,7 +262,9 @@ static void do_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
     fi->fh = (uint64_t) sub; // It works. Stop whining.
     fi->direct_io=1;
     fi->nonseekable=1;
-    fuse_reply_open(req, fi);
+    check_fuse_call(SIGFS_NIL_INDEX,
+                    fuse_reply_open(req, fi),
+                    "do_open(): fuse_reply_open(): Returned: ");
 
     SIGFS_LOG_DEBUG("do_open(): Returning ok" , sub->sig_id());
     return;
@@ -245,7 +286,7 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
     Subscriber* sub{(Subscriber*) fi->fh};
 
 
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(lu): Called", ino);
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(%lu): Called. Size[%lu]. offset[%ld]", ino, size, offset);
 
     if (ino != 2) {
         SIGFS_LOG_INDEX_WARNING(sub->sub_id(),"do_read(%lu): Only inode 2 can be read from", ino);
@@ -258,41 +299,133 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
     //     exit(1);
     // }
 
+    // We either deliver 100 signals in one go, or as many
+    // as we can until size_left runs out.
+    //
+    struct iovec iov[40]; // 56 Seems to be the max that fuse_reply_iov() accepts.
+//    sigfs_signal_t sig[IOV_MAX/2+1];
+    sigfs_signal_t sig[20];
+    std::uint32_t sig_ind = 0;
+    std::uint32_t iov_ind = 0;
+    size_t size_left = size; // Number of bytes left that we can report
+    std::uint32_t tot_payload = 0;
+
     Queue::signal_callback_t<fuse_req_t> cb =
-        [sub](fuse_req_t req, signal_id_t signal_id, const char* payload, std::uint32_t payload_size, sigfs::signal_count_t lost_signals) {
+        [sub, &iov, &sig, &sig_ind, &iov_ind, &size_left, &tot_payload]
+        (fuse_req_t req,
+         signal_id_t signal_id,
+         const char* payload,
+         std::uint32_t payload_size,
+         signal_count_t lost_signals,
+         signal_count_t remaining_signal_count) -> Queue::cb_result_t {
+
+            //
             // Is this an interrupt call?
+            //
             if (!payload) {
                 SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Interrupted!");
-		fuse_reply_err(req, EINTR);
+                fuse_req_interrupt_func(req, 0, 0);
+
+		check_fuse_call(sub->sub_id(),
+                                fuse_reply_err(req, EINTR),
+                                "do_read(): Interrupt: fuse_reply_err(req, EINTR) returned: ");
+
+
                 sub->set_interrupted(false);
-                return;
+                return Queue::cb_result_t::not_processed;
             }
 
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Sending back %lu bytes: [%-*s]", sizeof(signal_t) + payload_size, payload_size, payload);
-            signal_t sig = {
+            // Do we have enough space left for payload?
+            if (size_left < sizeof(sigfs_signal_t) + payload_size) {
+                SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): size_lft[%ld] < signal_size[%lu]. Return!",
+                                      size_left, sizeof(sigfs_signal_t) + payload_size);
+                return Queue::cb_result_t::not_processed;
+            }
+
+            sig[sig_ind] = {
                 .lost_signals = lost_signals,
                 .signal_id = signal_id,
-                .payload_size = payload_size
-            };
-
-            const struct iovec iov[2] = {
-                {
-                    .iov_base=(void*) &sig,
-                    .iov_len=sizeof(signal_t)
-                },
-                {
-                    .iov_base=(void*) payload,
-                    .iov_len=payload_size
+                .payload = {
+                    .payload_size = payload_size,
                 }
             };
 
-            fuse_reply_iov(req, iov, 2);
-            return;
+            iov[iov_ind] = {
+                .iov_base=(void*) &sig[sig_ind],
+                .iov_len=sizeof(sigfs_signal_t)
+            };
+
+            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Adding iov_ind[%d] signal_id[%lu/%lu] payload_size[%u/%u/%u]",
+                                  iov_ind,
+                                  signal_id, 
+                                  sig[sig_ind].signal_id,
+                                  payload_size,
+                                  sig[sig_ind].payload.payload_size,
+                                  ((sigfs_signal_t*) iov[iov_ind].iov_base)->payload.payload_size);
+
+            iov_ind++;
+
+            iov[iov_ind] = {
+                .iov_base=(void*) payload,
+                .iov_len=payload_size
+            };
+            iov_ind++;
+            sig_ind++;
+            tot_payload += sizeof(sigfs_signal_t) + payload_size;
+
+            //
+            // Can we accept more callbacks?
+            //
+            if (iov_ind < sizeof(iov)/sizeof(iov[0]) - 1 && remaining_signal_count > 0)
+                return Queue::cb_result_t::processed_call_again;
+
+            return Queue::cb_result_t::processed_dont_call_again;
         };
 
     fuse_req_interrupt_func(req, read_interrupt, (void*) sub);
     g_queue->dequeue_signal<fuse_req_t>(*sub, req, cb);
     fuse_req_interrupt_func(req, 0, 0);
+
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Sending back %d (of max %d) iov entries. Total length: %lu",
+                          iov_ind, IOV_MAX, tot_payload);
+
+
+#ifdef SIGFS_LOG
+    if (sigfs_log_level_get() == SIGFS_LOG_LEVEL_DEBUG) {
+        int byte_ind = 0;
+        for(uint32_t ind = 0; ind < iov_ind; ++ind) {
+            for(uint32_t ind1 = 0; ind1 < iov[ind].iov_len; ++ind1) {
+                char* ptr = (char*) iov[ind].iov_base + ind1;
+                //int val = (int) *ptr;
+
+                //SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "Sending Byte[%.4d] / iov[%.3d][%.4d]: %u", byte_ind, ind, ind1, val, val);
+
+                if ((byte_ind % 24) == 0) {
+                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "-----");
+                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  lost_signals[%u]", *((uint32_t*) ptr));
+                }
+
+                if ((byte_ind % 24) == 4)
+                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  signal_id   [%lu]", *((uint64_t*) ptr));
+
+                if ((byte_ind % 24) == 12)
+                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  payload_len [%lu]", *((uint32_t*) ptr));
+
+                if ((byte_ind % 24) == 16)
+                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "    pub_id [%lu]", *((uint32_t*) ptr));
+
+                if ((byte_ind % 24) == 20)
+                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "    sig_id[%lu]", *((uint32_t*) ptr));
+
+                byte_ind++;
+            }
+        }
+    }
+#endif 
+    check_fuse_call(sub->sub_id(),
+                    fuse_reply_iov(req, iov, iov_ind),
+                    "do_read(): fuse_reply_iov() returned ",
+                    iov_ind);
     return;
 }
 
@@ -300,37 +433,115 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
 static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
                      size_t size, off_t offset, struct fuse_file_info *fi)
 {
+    int index = SIGFS_NIL_INDEX;
 #ifdef SIGFS_LOG
     Subscriber* sub((Subscriber*) fi->fh);
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(%lu): Called", ino);
-
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  inode:     %lu", ino );
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  offset:    %lu", offset );
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  size:      %lu", size );
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  data:      [%-*s]",  (int) size, buffer);
+    index = sub->sub_id();
+    SIGFS_LOG_INDEX_DEBUG(index, "do_write(%lu): Called, offset[%lu] size[%lu]", ino, offset, size);
 #endif
 
     if (ino != 2) {
         SIGFS_LOG_INDEX_WARNING(sub->sub_id(),"do_write(%lu): Only inode 2 can be written to", ino);
-        fuse_reply_err(req, EPERM);
+        check_fuse_call(index,
+                        fuse_reply_err(req, EPERM),
+                        "do_write(%lu): fuse_reply_err(EPERM) returned: ", ino);
+
         return;
     }
+
+
+    // Traverse the buffer to check for integrity
+    size_t remaining_bytes = size;
+    while(remaining_bytes) {
+        sigfs_payload_t* payload((sigfs_payload_t*) buffer);
+
+        // Do we have enough for payload header?
+        if (remaining_bytes < sizeof(sigfs_payload_t)) {
+            SIGFS_LOG_INDEX_WARNING(index,
+                                    "do_write(%lu): Unaligned length at %lu bytes. Need at least %lu bytes to process next sigfs_payload_t record. Got %lu bytes",
+                                    ino, size - remaining_bytes, sizeof(sigfs_payload_t), remaining_bytes);
+
+            check_fuse_call(index,
+                            fuse_reply_err(req, EINVAL),
+                            "do_write(%lu): fuse_reply_err(EINVAL) [1] returned: ", ino);
+            return;
+        }
+
+        // Do we have enough for payload?
+        if (remaining_bytes < sizeof(sigfs_payload_t) + payload->payload_size) {
+            SIGFS_LOG_INDEX_WARNING(index,
+                                    "do_write(%lu): Unaligned length at %lu bytes. Need at least %lu bytes to process next sigfs_payload_t record. Got %lu bytes",
+                                    ino, size - remaining_bytes, sizeof(sigfs_payload_t), remaining_bytes);
+
+            check_fuse_call(index,
+                            fuse_reply_err(req, EINVAL),
+                            "do_write(%lu): fuse_reply_err(EINVAL) [2] returned: ", ino);
+            return;
+        }
+
+        // Do we have enough for payload header?
+        if (remaining_bytes < sizeof(sigfs_payload_t)) {
+            SIGFS_LOG_INDEX_WARNING(index,
+                                    "do_write(%lu): Unaligned length at %lu bytes. Need at least %lu bytes to process next sigfs_payload_t record. Got %lu bytes",
+                                    ino, size - remaining_bytes, sizeof(sigfs_payload_t), remaining_bytes);
+
+            check_fuse_call(index,
+                            fuse_reply_err(req, EINVAL),
+                            "do_write(%lu): fuse_reply_err(EINVAL) [3] returned: ", ino);
+
+            return;
+        }
+
+        //
+        // Queue signal.
+        //
+        g_queue->queue_signal(payload->payload, payload->payload_size);
+        SIGFS_LOG_INDEX_DEBUG(index, "do_write(%lu): Queued %d payload bytes", ino,payload->payload_size);
+        remaining_bytes -= SIGFS_PAYLOAD_SIZE(payload);
+        buffer += SIGFS_PAYLOAD_SIZE(payload);
+    }
+
 
     // if (offset != 0) {
     //     SIGFS_LOG_INDEX_FATAL(sub->sub_id(),"do_write(%lu): offset is %lu. Needs to be 0", ino,offset);
     //     exit(1);
     // }
 
-    g_queue->queue_signal(buffer, size);
-    fuse_reply_write(req, size);
+    check_fuse_call(index,
+                    fuse_reply_write(req, size),
+                    "do_write(%lu): fuse_reply_write(%lu) returned: ",
+                    ino, size);
 
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(%lu): Processed %d bytes", ino, size);
+    SIGFS_LOG_INDEX_DEBUG(index, "do_write(%lu): Processed %d bytes", ino, size);
 }
 
 
 static void dummy_log(fuse_log_level level, const char *fmt, va_list ap)
 {
-    (void) level;
+#ifndef SIGFS_LOG
+    return;
+#endif
+    char buf[1024];
+    static int level_map[] = {
+        SIGFS_LOG_LEVEL_FATAL, // FUSE_LOG_EMERG
+        SIGFS_LOG_LEVEL_FATAL, // FUSE_LOG_ALERT
+        SIGFS_LOG_LEVEL_FATAL, // FUSE_LOG_CRIT
+        SIGFS_LOG_LEVEL_ERROR, // FUSE_LOG_ERR
+        SIGFS_LOG_LEVEL_WARNING, // FUSE_LOG_WARN
+        SIGFS_LOG_LEVEL_INFO, // FUSE_LOG_NOTICE
+        SIGFS_LOG_LEVEL_COMMENT, // FUSE_LOG_INFO
+        SIGFS_LOG_LEVEL_DEBUG, // FUSE_LOG_DEBUG
+    };
+
+
+    int len = vsprintf(buf, fmt, ap);
+    // Shave off newlines.
+    while(len > 0 && buf[len-1] == '\n') {
+        len--;
+        buf[len] = 0;
+    }
+
+    sigfs_log(level_map[level], "FUSE", "[fuse]", 0, SIGFS_NIL_INDEX, buf);
 }
 
 
@@ -393,8 +604,10 @@ int main( int argc, char *argv[] )
     struct fuse_cmdline_opts opts;
     struct fuse_loop_config config;
     int ret = -1;
+    char* dummy1 = 0;
+    int dummy2 = 0;
 
-    g_queue = new Queue(8);
+    g_queue = new Queue(32768*512);
 
     if (fuse_parse_cmdline(&args, &opts) != 0)
         return 1;
@@ -418,9 +631,6 @@ int main( int argc, char *argv[] )
         goto err_out1;
     }
 
-    
-void fuse_req_interrupt_func(fuse_req_t req, fuse_interrupt_func_t func,
-			     void *data);
     fuse_set_log_func(dummy_log);
     se = fuse_session_new(&args, &operations, sizeof(operations), NULL);
     if (se == NULL)
@@ -432,12 +642,22 @@ void fuse_req_interrupt_func(fuse_req_t req, fuse_interrupt_func_t func,
     if (fuse_session_mount(se, opts.mountpoint) != 0)
         goto err_out3;
 
-    fuse_daemonize(opts.foreground);
 
+    char cwd[512];
+    dummy1 = getcwd(cwd, sizeof(cwd)-1); // Need to capture return value to avoid warning
+    (void) dummy1;
+    fuse_daemonize(opts.foreground);
+    (void) dummy2;
+    // Move us back from root directory.
+    dummy2 = chdir(cwd);
+    (void) dummy2;
     /* Block until ctrl+c or fusermount -u */
-    if (opts.singlethread)
+    if (opts.singlethread) {
         ret = fuse_session_loop(se);
+        puts("Single thread");
+    }
     else {
+        printf("%d idle threads\n", opts.max_idle_threads);
         config.clone_fd = opts.clone_fd;
         config.max_idle_threads = opts.max_idle_threads;
         ret = fuse_session_loop_mt(se, &config);

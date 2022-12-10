@@ -135,20 +135,23 @@ void Queue::queue_signal(const char* data, const size_t data_size)
         queue_[head_].set_sig_id(0);
 
         // Notify other queue_signal() callers waiting on conditional lock above
-        cond_.notify_one();
+        cond_.notify_all();
     }
 
     return;
 }
 
 
-
-
-const bool Queue::signal_available(const Subscriber& sub) const
+const signal_count_t Queue::signal_available(const Subscriber& sub) const
 {
     SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "signal_available(): Called");
     std::unique_lock lock(mutex_);
 
+    return signal_available_(sub);
+}
+
+const bool Queue::signal_available_(const Subscriber& sub) const
+{
     if (head() == tail() || index(sub.sig_id()) == head()) {
         SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
                               "signal_available(): head{%u} %s tail{%u} --- index(sub.sig_id{%lu}){%u} %s head{%u} -> SIgnal not available.",

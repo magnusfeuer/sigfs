@@ -10,7 +10,7 @@
 // Simple publisher that writes signal(s) to a sigfs file.
 //
 #include <getopt.h>
-#include "queue.hh"
+#include "sigfs_common.h"
 #include <string>
 #include <iostream>
 #include <memory.h>
@@ -28,6 +28,11 @@ void usage(const char* name)
     std::cout << "        -f <file> | --file=<file>" << std::endl;
     std::cout << "        -c <signal-count> | --count=<signal-count>" << std::endl;
     std::cout << "        -s <usec> | --sleep=<usec>" << std::endl;
+    std::cout << "-f <file>         The signal file to publish to." << std::endl;
+    std::cout << "-c <signal-count> How many signals to send." << std::endl;
+    std::cout << "-s <usec>         How many microseconds to sleep between each send." << std::endl;
+    std::cout << "-d <data>         Data to publish. \"%d\" will be replaced with counter." << std::endl;
+    std::cout << "-h                Print data in hex. Default is to print escaped strings." << std::endl;
 }
 
 int main(int argc,  char *const* argv)
@@ -45,9 +50,12 @@ int main(int argc,  char *const* argv)
     int count{1};
     int usec_sleep{0};
     int fd{-1};
+
+    //
     // loop over all of the options
+    //
     fmt_string[0] = 0;
-    while ((ch = getopt_long(argc, argv, "d:f:c:s:", long_options, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "d:f:c:s:h", long_options, NULL)) != -1) {
         // check to see if a single character or long option came through
         switch (ch)
         {
@@ -92,22 +100,22 @@ int main(int argc,  char *const* argv)
     }
 
     // Create a buffer that can host our data string plus whatever number we put in
-    char buf[strlen(fmt_string) + 100]; 
+    char buf[sizeof(sigfs_payload_t) + strlen(fmt_string) + 100];
+    sigfs_payload_t* payload = (sigfs_payload_t*) buf;
 
     int ind = 0;
     while(ind < count) {
-        sprintf(buf, fmt_string, ind);
+        payload->payload_size = sprintf(payload->payload, fmt_string, ind + 1);
 
-        ssize_t write_res = write(fd, buf, strlen(buf)+1);
+        ssize_t write_res = write(fd, payload, SIGFS_PAYLOAD_SIZE(payload));
         if (write_res == -1) {
-            std::cout << "Failed to write " << strlen(buf)+1 << " bytes to file " << file << ": " << strerror(errno) << std::endl;
+            std::cout << "Failed to write " << strlen(buf) << " bytes to file " << file << ": " << strerror(errno) << std::endl;
             exit(255);
         }
 
         if (usec_sleep)
             usleep(usec_sleep);
 
-        std::cout << "Wrote " << strlen(buf)+1 << " bytes to file " << file << ": " << buf << std::endl;
         ++ind;
     }
     close(fd);

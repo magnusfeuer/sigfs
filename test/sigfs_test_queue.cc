@@ -48,8 +48,12 @@ void check_signal(sigfs::Queue& queue,
 
     sigfs::Queue::signal_callback_t<void*> cb =
         [&queue, prefix, wanted_res, &sub, wanted_data, wanted_lost_signals]
-        (void* userdata, sigfs::signal_id_t signal_id, const char* payload, std::uint32_t payload_size, sigfs::signal_count_t lost_signals)
-        {
+        (void* userdata,
+         signal_id_t signal_id,
+         const char* payload,
+         std::uint32_t payload_size,
+         signal_count_t lost_signals,
+         signal_count_t remaining_signal_count) -> sigfs::Queue::cb_result_t {
             if (!payload) {
                 SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Wanted %lu bytes. Got interrupted!", prefix, wanted_res);
                 queue.dump(prefix, sub);
@@ -61,16 +65,20 @@ void check_signal(sigfs::Queue& queue,
                 queue.dump(prefix, sub);
                 exit(1);
             }
+
             if (memcmp(payload, wanted_data, payload_size)) {
                 SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Wanted data [%-*s]. Got [%-*s]", prefix, wanted_res, wanted_data, (int) payload_size, payload);
                 queue.dump(prefix, sub);
                 exit(1);
             }
+
             if ((int) lost_signals != wanted_lost_signals) {
                 SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Wanted lost signals %lu. Got %lu", prefix, wanted_lost_signals, lost_signals);
                 queue.dump(prefix, sub);
                 exit(1);
             }
+            return sigfs::Queue::cb_result_t::processed_dont_call_again;
+
         };
 
     queue.dequeue_signal<void*>(sub, 0, cb);
@@ -101,19 +109,19 @@ void check_signal_sequence(const char* test_id,
 {
     int expect_sigid[prefix_count] = {};
 
-
-    while(count--) {
+    while(count) {
         //
         // We do the callback since signal is a part of a locked context in queue.cc
         // Once this lambda returns, signal will be undefined.
         //
         sigfs::Queue::signal_callback_t<void*> cb =
-            [test_id, sub, prefix_count, prefix_ids, &expect_sigid]
+            [test_id, &count, sub, prefix_count, prefix_ids, &expect_sigid]
             (void* x,
-             sigfs::signal_id_t signal_id,
+             signal_id_t signal_id,
              const char* payload,
              std::uint32_t payload_size,
-             sigfs::signal_count_t lost_signals) {
+             signal_count_t lost_signals,
+             signal_count_t remaining_signal_count) -> sigfs::Queue::cb_result_t {
 
                 int prefix_ind{0};
                 (void) x;
@@ -164,16 +172,17 @@ void check_signal_sequence(const char* test_id,
                 }
 
                 SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
-                                      "%s: Comparing expected signal ID [%.8X][%.8X] with received [%.8X][%.8X]",
+                                      "%s: Comparing expected signal ID [%.3d][%.8d] with received [%.3d][%.8d]. %d signals left",
                                       test_id,
                                       prefix_ids[prefix_ind], expect_sigid[prefix_ind],
                                       *((int*) payload),
-                                      *((int*) (payload + sizeof(int))));
+                                      *((int*) (payload + sizeof(int))),
+                                      remaining_signal_count);
 
                 // Check that the rest of the signal payload after prefix matches expectations.
                 if (*((int*) (payload + sizeof(int))) != expect_sigid[prefix_ind]) {
                     SIGFS_LOG_INDEX_FATAL(sub.sub_id(),
-                                          "%s: Expected signal ID [%.8X][%.8X], received [%.8X][%.8X]",
+                                          "%s: Expected signal ID [%.3d][%.8d], received [%.3d][%.8d]",
                                           test_id, prefix_ids[prefix_ind], expect_sigid[prefix_ind],
                                           *((int*) payload),
                                           *((int*) (payload + sizeof(int))));
@@ -184,8 +193,14 @@ void check_signal_sequence(const char* test_id,
                 // Payload good. Increase next expected signal ID for the
                 // given prefix
                 expect_sigid[prefix_ind]++;
+                count--;
+                return sigfs::Queue::cb_result_t::processed_call_again;
             };
 
+
+        //
+        // Do multiple callbacks.
+        //
         sub.queue().dequeue_signal<void*>(sub, (void*) 0, cb);
 
     }
@@ -229,7 +244,7 @@ void publish_signal_sequence(const char* test_id, sigfs::Queue& queue, const int
     for(sig_id = 0; sig_id < count; ++sig_id) {
         *((int*) buf) = publish_id;
         *((int*) (buf + sizeof(int))) = sig_id;
-        SIGFS_LOG_DEBUG("%s: Publishing signal [%.8X][%.8X] (%.8X %.8X)",
+        SIGFS_LOG_DEBUG("%s: Publishing signal [%.3d][%.8d] (%.3d %.8d)",
                         test_id,
                         *((int*) buf),
                         *((int*) (buf + sizeof(int))),

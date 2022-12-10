@@ -71,7 +71,7 @@ namespace sigfs {
             interrupted_ = interrupted;
         }
 
-        const bool signal_available(void) const
+        const signal_count_t signal_available(void) const
         {
             return queue_.signal_available(*this);
         }
