@@ -287,7 +287,7 @@ void check_signal_sequence(const char* filename, int pub_count, int signal_count
 
                     switch(ind1 % 24) {
                     case 4:
-                        len += sprintf(dbg + len, "signal_id[%lu]", *((uint64_t*) ptr));
+                        len += sprintf(dbg + len, "signal_id[%lu] ", *((uint64_t*) ptr));
                         break;
 
                     case 12:
