@@ -105,6 +105,15 @@ main design features.
    lost. The internal buffer size can be specified in the
    configuration file.
 
+# Building sigfs
+
+    make
+    
+The package `libfuse3-dev` needs to be installed to provide the FUSE
+library and header files.
+
+
+
 # Starting sigfs
 
     $ mkdir sigfs-dir
@@ -121,36 +130,125 @@ configuration file.
 
 Please use `sigfs --help` for a list of available options.
 
-# Programmer's guide
+**NOTE**: `sigfs` currently only creates a single file,
+`"./sigfs-dir/x"`. Future versions will support full-blown directory
+trees with multiple signal files.
 
+
+# Trying out sigfs:
+
+In a terminal window, start the sample subscriber:
+
+    $ ./example/sigfs-subscribe -f ./sigfs-dir/x
+
+In another terminal window, run the sample publisher:
+
+    $ ./example/sigfs-publish -f ./sigfs-dir/x -d "Hello world"
+
+
+
+# Sample publisher code
+The following python code publishes a signal to a sigfs file:
+
+```python
+data = "Hello world"
+data_len = len(data)
+with open("sigfs-dir/my-signal-file", "wb") as f:
+    bin_data = struct.pack(f"=I{data_len}s", data_len, bytes(data, "ascii"))
+    f.write(bin_data)
+```
+
+Each write to a sigfs signal file has the following format:
+
+| Start byte | Stop byte        | Name         | Type   | Description                  |
+|------------|------------------|--------------|--------|------------------------------|
+| 0          | 3                | payload_size | uint32 | Payload size                 |
+| 4          | 4+$payload_size  | payload      | data   | Payload                      |
+
+* **`payload_size`**  
+    Specifies the number of bytes of the subsequent payload.
+
+* **`payload`**  
+    Contains the signal payload/
+
+# Sample subscriber code
+The following python code reads a signal from a sigfs file:
+
+```python
+with ("sigfs-dir/my-signal-file", "rb") as f:
+    data = f.read(4+8+4)
+
+    (lost_signals, signal_id, payload_size) = struct.unpack("=IQI", data)
+    payload = f.read(payload_size)
+```
+
+Each read from a sigfs signal file will return data with the following format.
+
+| Start byte | Stop byte        | Name         | Type   | Description                  |
+|------------|------------------|--------------|--------|------------------------------|
+| 0          | 3                | signals_lost | uint32 | Signals lost since last read |
+| 4          | 11               | signal_id    | uint64 | Unique signal ID             |
+| 12         | 15               | payload_size | uint32 | Payload size                 |
+| 16         | 16+$payload_size | payload      | data   | Payload                      |
+
+* **`signals_lost`**  
+    Specifies the number of signals lost since the last time the 
+    process invoked read.  
+    Signals are lost if they are published faster than the subscriber
+    can read them, eventually overwriting the internal sigfs circular
+    buffer.
+
+* **`signal_id`**  
+    Specifies a unique ID for the returned signal.  
+    The signal ID will never be repeated for the same signal file for
+    as long as the `sigfs` process is running.  The same signal ID may
+    be used in two different signal files.
+    
+* **`payload_size`**  
+    Specifies the number of bytes of the subsequent payload.
+
+* **`payload`**  
+    Contains the signal payload, as written by the publisher.
+
+
+
+# Programmer's guide
 The following chapters describe the file system call sequence used to
 publish and subscribe to signals in a sigfs file. System calls are
 used since it is the most low-level interface that any programming
 language eventually uses to do file I/O.
 
 
-## Publisher's guide
-A process wishing to publish signals goes through the steps described below.
 
-
-### Opening file for writing
+## Opening a signal file for writing/publishing
 The sigfs signal file is opened as with any regular file, using the
 write-only flag to disable reading. Do not use the append flag.
 
 
-    fd = open("./sigfs-dir/", O_RDONLY);
+    fd = open("./sigfs-dir/my-signal-file", O_RDONLY);
 
 The returned file descriptor can be written to in order to 
 
+## Writing/publishing to a signal file
+TBD
 
-# Sample publisher code
+## Opening a signal file for reading/subscribing
 
-# Sample subscriber code
-   
+## Reading/subscribing from a signal file
+TBD
+
+
+## Blocking calls and non-blocking I/O
+TBD
+
+## Interrupted calls
+TBD
+
 # Performance
+TBD
 
 # FAQ
 1. Can I open a file for reading and writing?
-2. 
-
+2. What happens if no signals are available when I call read?
+3. More
 

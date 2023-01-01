@@ -50,7 +50,7 @@ if __name__ == "__main__":
         print("Ctrl-c to exit")
         while True:
             # Read signal header data
-            data = f.read(4+8+4))
+            data = f.read(4+8+4)
 
             # Unpack header
             (lost_signals, signal_id, payload_size) = struct.unpack("=IQI", data)
