@@ -393,35 +393,33 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
 #ifdef SIGFS_LOG
     if (sigfs_log_level_get() == SIGFS_LOG_LEVEL_DEBUG) {
         int byte_ind = 0;
+        char dbg[512];
+        int len = 0;
         for(uint32_t ind = 0; ind < iov_ind; ++ind) {
             for(uint32_t ind1 = 0; ind1 < iov[ind].iov_len; ++ind1) {
                 char* ptr = (char*) iov[ind].iov_base + ind1;
-                //int val = (int) *ptr;
-
-                //SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "Sending Byte[%.4d] / iov[%.3d][%.4d]: %u", byte_ind, ind, ind1, val, val);
 
                 if ((byte_ind % 24) == 0) {
-                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "-----");
-                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  lost_signals[%u]", *((uint32_t*) ptr));
+                    if (len)
+                        SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), dbg);
+                    // Start new line
+                    len = sprintf(dbg, "read[%d]: ", byte_ind);
                 }
 
-                if ((byte_ind % 24) == 4)
-                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  signal_id   [%lu]", *((uint64_t*) ptr));
+                switch(byte_ind % 24) {
+                case 4:
+                    len += sprintf(dbg + len, "signal_id[%lu] ", *((uint64_t*) ptr));
+                    break;
 
-                if ((byte_ind % 24) == 12)
-                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "  payload_len [%lu]", *((uint32_t*) ptr));
-
-                if ((byte_ind % 24) == 16)
-                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "    pub_id [%lu]", *((uint32_t*) ptr));
-
-                if ((byte_ind % 24) == 20)
-                    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "    sig_id[%lu]", *((uint32_t*) ptr));
-
+                case 12:
+                    len += sprintf(dbg + len, "payload_len[%u] ", *((uint32_t*) ptr));
+                    break;
+                }
                 byte_ind++;
             }
         }
     }
-#endif 
+#endif
     check_fuse_call(sub->sub_id(),
                     fuse_reply_iov(req, iov, iov_ind),
                     "do_read(): fuse_reply_iov() returned ",
