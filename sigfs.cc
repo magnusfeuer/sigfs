@@ -571,7 +571,7 @@ int main( int argc, char *argv[] )
           .setxattr    = do_setxattr,
           .getxattr    = do_getxattr,
           .listxattr   = do_listxattr,
-          .create	     = 0,
+          .create      = 0,
           .releasedir  = 0,
           .fsyncdir    = 0,
           .access      = 0,
@@ -604,8 +604,6 @@ int main( int argc, char *argv[] )
     struct fuse_cmdline_opts opts;
     struct fuse_loop_config config;
     int ret = -1;
-    char* dummy1 = 0;
-    int dummy2 = 0;
 
     g_queue = new Queue(32768*512);
 
@@ -642,15 +640,8 @@ int main( int argc, char *argv[] )
     if (fuse_session_mount(se, opts.mountpoint) != 0)
         goto err_out3;
 
-
-    char cwd[512];
-    dummy1 = getcwd(cwd, sizeof(cwd)-1); // Need to capture return value to avoid warning
-    (void) dummy1;
     fuse_daemonize(opts.foreground);
-    (void) dummy2;
     // Move us back from root directory.
-    dummy2 = chdir(cwd);
-    (void) dummy2;
     /* Block until ctrl+c or fusermount -u */
     if (opts.singlethread) {
         ret = fuse_session_loop(se);
