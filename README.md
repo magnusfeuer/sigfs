@@ -7,6 +7,32 @@ that need a fast, secure, robust, and lightwait signal distribution
 mechanism that replaces more traditional approaches of using using
 DBUS, MQTT or other similar solutions.
 
+
+<!-- markdown-toc start - Don't edit this section. Run M-x markdown-toc-refresh-toc -->
+**Table of Contents**
+
+- [SIGFS - SIGNAL FILE SYSTEM](#sigfs---signal-file-system)
+- [REQUIREMENTS](#requirements)
+- [HOW IT WORKS](#how-it-works)
+- [BUILDING SIGFS](#building-sigfs)
+- [STARTING SIGFS](#starting-sigfs)
+- [LOGGING](#logging)
+- [TRYING OUT SIGFS](#trying-out-sigfs)
+- [SAMPLE PUBLISHER CODE](#sample-publisher-code)
+- [SAMPLE SUBSCRIBER CODE](#sample-subscriber-code)
+- [PROGRAMMER'S GUIDE](#programmers-guide)
+    - [Opening a signal file for writing/publishing](#opening-a-signal-file-for-writingpublishing)
+    - [Writing/publishing to a signal file](#writingpublishing-to-a-signal-file)
+    - [Opening a signal file for reading/subscribing](#opening-a-signal-file-for-readingsubscribing)
+    - [Reading/subscribing from a signal file](#readingsubscribing-from-a-signal-file)
+    - [Blocking calls and non-blocking I/O](#blocking-calls-and-non-blocking-io)
+    - [Interrupted calls](#interrupted-calls)
+- [Performance](#performance)
+- [FAQ](#faq)
+
+<!-- markdown-toc end -->
+
+# REQUIREMENTS
 SIGFS has the following design objectives, derived from automotive
 requirements:
 
@@ -46,7 +72,7 @@ requirements:
    pre-installed in linux distros and Yocto-builds.
    
 
-# How it works
+# HOW IT WORKS
 
 
 ```mermaid
@@ -105,16 +131,17 @@ main design features.
    lost. The internal buffer size can be specified in the
    configuration file.
 
-# Building sigfs
+# BUILDING SIGFS
 
-    make
+    $ make
+    $ make debug # See logging chapter below
     
 The package `libfuse3-dev` needs to be installed to provide the FUSE
 library and header files.
 
 
 
-# Starting sigfs
+# STARTING SIGFS
 
     $ mkdir sigfs-dir
     $ /sigfs -c sigfs.cfg -f ./sigfs-dir 
@@ -135,8 +162,37 @@ Please use `sigfs --help` for a list of available options.
 trees with multiple signal files.
 
 
-# Trying out sigfs:
+# LOGGING
+Sigfs and the sample & test C++ programs all have extensive logging that are activated in the debug build:
 
+    $ make debug
+    
+Logging level is set by the environment variable `SIGFS_LOG_LEVEL` that can be between 0 - no logging and 6 - debugging.
+
+Logging has the following format: 
+
+
+    D 695365 [000] sigfs.cc:389 do_write(2): Processed 8 bytes
+
+* **`D`** - Log level  
+Can `D`ebug (level 6), `C`omment (level 5), `I`nfo (level 4),
+`W`arning (level 3), `E`rror (level 2), `F`atal (level 1).
+
+* **`695365`** - Time stamp__
+Number of microseconds since logging was started
+
+* **`[000]`** - Thread index  
+Color coded (when printing to terminal) index for each thread to ease
+reading logs from multiple threads.
+
+* **`sigfs.cc:389`** - Log location
+Source file and line number of the logging call.
+
+* **`do_write(2): Processed 8 bytes`** - Log text
+Log entry text.
+
+
+# TRYING OUT SIGFS
 In a terminal window, start the sample subscriber:
 
     $ ./example/sigfs-subscribe -f ./sigfs-dir/x
@@ -147,7 +203,7 @@ In another terminal window, run the sample publisher:
 
 
 
-# Sample publisher code
+# SAMPLE PUBLISHER CODE
 The following python code publishes a signal to a sigfs file:
 
 ```python
@@ -171,7 +227,7 @@ Each write to a sigfs signal file has the following format:
 * **`payload`**  
     Contains the signal payload/
 
-# Sample subscriber code
+# SAMPLE SUBSCRIBER CODE
 The following python code reads a signal from a sigfs file:
 
 ```python
@@ -212,7 +268,7 @@ Each read from a sigfs signal file will return data with the following format.
 
 
 
-# Programmer's guide
+# PROGRAMMER'S GUIDE
 The following chapters describe the file system call sequence used to
 publish and subscribe to signals in a sigfs file. System calls are
 used since it is the most low-level interface that any programming
