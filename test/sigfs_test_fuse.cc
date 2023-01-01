@@ -9,6 +9,10 @@
 //
 // File system test of sigfs. 
 //
+// TESTS TO ADD:
+// Check that we get an error back if we provide a read buffer too small to read a pending signal.
+// Test non blocking mode when it is implemented.
+//
 
 #include <getopt.h>
 #include <sys/types.h>
