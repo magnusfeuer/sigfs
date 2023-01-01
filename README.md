@@ -178,17 +178,17 @@ Logging has the following format:
 Can `D`ebug (level 6), `C`omment (level 5), `I`nfo (level 4),
 `W`arning (level 3), `E`rror (level 2), `F`atal (level 1).
 
-* **`695365`** - Time stamp__
+* **`695365`** - Time stamp  
 Number of microseconds since logging was started
 
 * **`[000]`** - Thread index  
 Color coded (when printing to terminal) index for each thread to ease
 reading logs from multiple threads.
 
-* **`sigfs.cc:389`** - Log location
+* **`sigfs.cc:389`** - Log location  
 Source file and line number of the logging call.
 
-* **`do_write(2): Processed 8 bytes`** - Log text
+* **`do_write(2): Processed 8 bytes`** - Log text  
 Log entry text.
 
 
