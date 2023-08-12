@@ -4,15 +4,15 @@
 
 .PHONY: all clean debug install install-examples install-test uninstall test examples
 
-HDR=queue.hh subscriber.hh sigfs_common.h log.h queue_impl.hh
+HDR=queue.hh subscriber.hh sigfs_common.h log.h queue_impl.hh fstree.hh
 
 
-INCLUDES=$(shell pkg-config fuse3 --cflags)
+INCLUDES=-I./json/include $(shell pkg-config fuse3 --cflags)
 
 #
 # Signal FS main process
 #
-SIGFS_SRC=sigfs.cc log.cc queue.cc
+SIGFS_SRC=fstree_filesystem.cc fstree_directory.cc sigfs.cc log.cc queue.cc config.cc 
 SIGFS_OBJ=${patsubst %.cc, %.o, ${SIGFS_SRC}}
 SIGFS=sigfs
 
@@ -20,8 +20,8 @@ DESTDIR ?= /usr/local
 export DESTDIR
 
 
-debug: CXXFLAGS ?=-DSIGFS_LOG -ggdb  ${INCLUDES} -std=c++17 -Wall -pthread # -pg
-CXXFLAGS ?=-O3 ${INCLUDES} -std=c++17 -Wall -pthread 
+debug: CXXFLAGS ?=-DSIGFS_LOG -ggdb  ${INCLUDES} -std=c++20 -Wall -pthread # -pg
+CXXFLAGS ?=-O3 ${INCLUDES} -std=c++20 -Wall -pthread 
 
 #
 # Build the entire project.

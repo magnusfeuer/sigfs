@@ -20,14 +20,20 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <iostream>
 #include "log.h"
 #include "queue_impl.hh"
 #include "subscriber.hh"
 #include <limits.h>
+#include "config.hh"
+#include <getopt.h>
+
+#include "fstree.hh"
 
 using namespace sigfs;
 
 Queue* g_queue(0);
+
 
 
 static int check_fuse_call(int index, int fuse_result, const char* fmt, ...)
@@ -542,12 +548,87 @@ static void dummy_log(fuse_log_level level, const char *fmt, va_list ap)
     sigfs_log(level_map[level], "FUSE", "[fuse]", 0, SIGFS_NIL_INDEX, buf);
 }
 
+void usage(const char* name)
+{
+    std::cout << "Usage: " << name << " -c <config-file> | --config=<config-file>" << std::endl << std::endl; // 
+//    std::cout << "        -f <file> | --file=<file>" << std::endl;
+//    std::cout << "        -c <signal-count> | --count=<signal-count>" << std::endl;
+//    std::cout << "        -s <usec> | --sleep=<usec>" << std::endl;
+    std::cout << "-c <config-file>  The JSON configuration file to load." << std::endl;
+//    std::cout << "-c <signal-count> How many signals to send." << std::endl;
+//    std::cout << "-s <usec>         How many microseconds to sleep between each send." << std::endl;
+//    std::cout << "-d <data>         Data to publish. \"%d\" will be replaced with counter." << std::endl;
+//    std::cout << "-h                Print data in hex. Default is to print escaped strings." << std::endl;
+}
 
 // Nil functions that we don't want to pollute the source file with
-//#include "sigfs_inc.cc"
 
-int main( int argc, char *argv[] )
+int main( int argc,  char **argv )
 {
+    int ch = 0;
+    static struct option long_options[] =  {
+        {"config", required_argument, NULL, 'c'},
+        {"help", optional_argument, NULL, 'h'},
+        {"foreground", optional_argument, NULL, 'f'},
+        {NULL, 0, NULL, 0}
+    };
+    std::string config_file{""};
+
+    //
+    // loop over all of the options
+    //
+    while ((ch = getopt_long(argc, argv, "c:", long_options, NULL)) != -1) {
+        // check to see if a single character or long option came through
+        switch (ch)
+        {
+        case 'c':
+            config_file = optarg;
+            break;
+
+        default:
+            usage(argv[0]);
+            exit(255);
+        }
+    }
+
+    if (config_file.size() == 0) {
+        std::cout << std::endl << "Missing argument: -d <data>" << std::endl << std::endl;
+        usage(argv[0]);
+        exit(255);
+    }
+
+    struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+    struct fuse_session *se;
+    struct fuse_cmdline_opts opts;
+    struct fuse_loop_config config;
+    int ret = -1;
+
+    g_queue = new Queue(32768*512);
+
+    if (fuse_parse_cmdline(&args, &opts) != 0)
+        return 1;
+
+
+    if (opts.show_help) {
+        printf("usage: %s [options] <mountpoint>\n\n", argv[0]);
+        fuse_cmdline_help();
+        fuse_lowlevel_help();
+        ret = 0;
+        goto err_out1;
+    } else if (opts.show_version) {
+        printf("FUSE library version %s\n", fuse_pkgversion());
+        fuse_lowlevel_version();
+        ret = 0;
+        goto err_out1;
+    }
+
+    if(opts.mountpoint == NULL) {
+        printf("usage: %s [options] <mountpoint>\n", argv[0]);
+        printf("       %s --help\n", argv[0]);
+        ret = 1;
+        goto err_out1;
+    }
+
     static struct fuse_lowlevel_ops operations = {
 /*
           .readlink    = do_readlink,
@@ -596,36 +677,6 @@ int main( int argc, char *argv[] )
         .readdir     = do_readdir,
     };
 
-
-    struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-    struct fuse_session *se;
-    struct fuse_cmdline_opts opts;
-    struct fuse_loop_config config;
-    int ret = -1;
-
-    g_queue = new Queue(32768*512);
-
-    if (fuse_parse_cmdline(&args, &opts) != 0)
-        return 1;
-    if (opts.show_help) {
-        printf("usage: %s [options] <mountpoint>\n\n", argv[0]);
-        fuse_cmdline_help();
-        fuse_lowlevel_help();
-        ret = 0;
-        goto err_out1;
-    } else if (opts.show_version) {
-        printf("FUSE library version %s\n", fuse_pkgversion());
-        fuse_lowlevel_version();
-        ret = 0;
-        goto err_out1;
-    }
-
-    if(opts.mountpoint == NULL) {
-        printf("usage: %s [options] <mountpoint>\n", argv[0]);
-        printf("       %s --help\n", argv[0]);
-        ret = 1;
-        goto err_out1;
-    }
 
     fuse_set_log_func(dummy_log);
     se = fuse_session_new(&args, &operations, sizeof(operations), NULL);
