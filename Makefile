@@ -4,37 +4,48 @@
 
 .PHONY: all clean debug install install-examples install-test uninstall test examples
 
-HDR=queue.hh subscriber.hh sigfs_common.h log.h queue_impl.hh
+HDR=queue.hh subscriber.hh sigfs_common.h log.h queue_impl.hh fs.hh
 
 
-INCLUDES=$(shell pkg-config fuse3 --cflags)
+INCLUDES=-I./json/include $(shell pkg-config fuse3 --cflags)
 
 #
 # Signal FS main process
 #
-SIGFS_SRC=sigfs.cc log.cc queue.cc
+SIGFS_SRC=fs_filesys.cc fs_dir.cc fs_file.cc fs_inode.cc sigfs.cc log.cc queue.cc fs_access.cc
 SIGFS_OBJ=${patsubst %.cc, %.o, ${SIGFS_SRC}}
 SIGFS=sigfs
+
+SIGFS_TEST_SRC=fs_test.cc fs_filesys.cc fs_inode.cc fs_dir.cc fs_file.cc fs_access.cc log.cc
+SIGFS_TEST_OBJ=${patsubst %.cc, %.o, ${SIGFS_TEST_SRC}}
+SIGFS_TEST=sigfs_test
 
 DESTDIR ?= /usr/local
 export DESTDIR
 
 
-debug: CXXFLAGS ?=-DSIGFS_LOG -ggdb  ${INCLUDES} -std=c++17 -Wall -pthread # -pg
-CXXFLAGS ?=-O3 ${INCLUDES} -std=c++17 -Wall -pthread 
+debug: CXXFLAGS ?=-DSIGFS_LOG -ggdb  ${INCLUDES} -std=c++20 -Wall -pthread # -pg
+CXXFLAGS ?=-O3 ${INCLUDES} -std=c++20 -Wall -pthread 
 
 #
 # Build the entire project.
 #
-all:  ${SIGFS}
+all:  ${SIGFS} ${SIGFS_TEST}
 
-debug: ${SIGFS} 
+debug: ${SIGFS} ${SIGFS_TEST}
 
 #
 #	Rebuild the static target library.
 #
 ${SIGFS}: ${SIGFS_OBJ}
 	${CXX} -o ${SIGFS} ${SIGFS_OBJ} ${CXXFLAGS} `pkg-config fuse3 --cflags --libs`
+
+
+#
+#	Temporary test
+#
+${SIGFS_TEST}: ${SIGFS_TEST_OBJ}
+	${CXX} -o ${SIGFS_TEST} ${SIGFS_TEST_OBJ} ${CXXFLAGS} `pkg-config fuse3 --cflags --libs`
 
 
 ${SIGFS_OBJ}: ${HDR}

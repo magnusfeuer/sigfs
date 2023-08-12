@@ -44,13 +44,13 @@ requirements:
 3. **Easy to integrate**  
    Sigfs is purely interfaced by file operations such as `open()`,
    `read()`, `write()`, and `[e]poll()`, enabling any programming
-   language with file I/O support to publish and subscribe to signals
+   that can read and write to a file to publish and subscribe to signals
    without any libraries or other dependenceies.
    
 2. **Scalable**  
    Grouping ten signals into each publish / write operations, increasing the number
    of subscribers from one to ten halves the signal throughput from ~1,000,000 to ~500,000.
-   **MORE**
+   **MORE DATA TO BE PROVIDED**
 
 3. **Secure** *Not yet implemented*  
    The sigfs configuration file whitelists uids and gids that can
@@ -77,9 +77,9 @@ requirements:
 
 ```mermaid
 sequenceDiagram
-    Publisher->>sigfs: open-for-write("./sigfs-dir/my-signal-file")
-    Subscriber 1->>sigfs: open-for-read("./sigfs-dir/my-signal-file")
-    Subscriber 2->>sigfs: open-for-read("./sigfs-dir/my-signal-file", "read")
+    Publisher->>sigfs: open-for-write("./sigfs/my-signal-file")
+    Subscriber 1->>sigfs: open-for-read("./sigfs/my-signal-file")
+    Subscriber 2->>sigfs: open-for-read("./sigfs/my-signal-file", "read")
     Publisher->>sigfs: write("Hello world")
     Subscriber 1->>sigfs: read()
     sigfs->>Subscriber 1: "Hello world"
@@ -131,26 +131,18 @@ main design features.
    lost. The internal buffer size can be specified in the
    configuration file.
 
-# BUILDING SIGFS
-
-    $ make
-    $ make debug # See logging chapter below
-    
-The package `libfuse3-dev` needs to be installed to provide the FUSE
-library and header files.
-
-
-
 # STARTING SIGFS
 
     $ mkdir sigfs-dir
-    $ /sigfs -c sigfs.cfg -f ./sigfs-dir 
+    $ ./sigfs -f ./sigfs-dir
 
 The command line arguments to sigfs are forwarded directly to the
-underlying FUSE library (libfuse).  The only added parameter is `-c
+underlying FUSE library (libfuse). 
+
+**TO BE IMPLEMENTED:** The only added parameter is `-c
 <config-dile>`, specifying the sigfs JSON configuration file to use.
 
-Running `sigfs` will mount a file system on top of the specified
+Running `./sigfs` will mount a file system on top of the specified
 directory (`./sigfs-dir`) and create a number of signal files in that
 file system. The signal files to create are read from the
 configuration file.
@@ -160,6 +152,17 @@ Please use `sigfs --help` for a list of available options.
 **NOTE**: `sigfs` currently only creates a single file,
 `"./sigfs-dir/x"`. Future versions will support full-blown directory
 trees with multiple signal files.
+
+
+
+# BUILDING SIGFS
+
+    $ make
+    $ make debug # See logging chapter below
+    
+The package `libfuse3-dev` needs to be installed to provide the FUSE
+library and header files.
+
 
 
 # LOGGING
@@ -195,11 +198,11 @@ Log entry text.
 # TRYING OUT SIGFS
 In a terminal window, start the sample subscriber:
 
-    $ ./example/sigfs-subscribe -f ./sigfs-dir/x
+    $ ./example/sigfs-subscribe -f ./sigfs/x
 
 In another terminal window, run the sample publisher:
 
-    $ ./example/sigfs-publish -f ./sigfs-dir/x -d "Hello world"
+    $ ./example/sigfs-publish -f ./sigfs/x -d "Hello world"
 
 
 
@@ -209,7 +212,7 @@ The following python code publishes a signal to a sigfs file:
 ```python
 data = "Hello world"
 data_len = len(data)
-with open("sigfs-dir/my-signal-file", "wb") as f:
+with open("sigfs/my-signal-file", "wb") as f:
     bin_data = struct.pack(f"=I{data_len}s", data_len, bytes(data, "ascii"))
     f.write(bin_data)
 ```
@@ -218,7 +221,7 @@ Each write to a sigfs signal file has the following format:
 
 | Start byte | Stop byte        | Name         | Type   | Description                  |
 |------------|------------------|--------------|--------|------------------------------|
-| 0          | 3                | payload_size | uint32 | Payload size                 |
+| 0          | 3                | payload\_size | uint32 | Payload size                 |
 | 4          | 4+$payload_size  | payload      | data   | Payload                      |
 
 * **`payload_size`**  
@@ -231,7 +234,7 @@ Each write to a sigfs signal file has the following format:
 The following python code reads a signal from a sigfs file:
 
 ```python
-with ("sigfs-dir/my-signal-file", "rb") as f:
+with ("sigfs/my-signal-file", "rb") as f:
     data = f.read(4+8+4)
 
     (lost_signals, signal_id, payload_size) = struct.unpack("=IQI", data)
@@ -242,9 +245,9 @@ Each read from a sigfs signal file will return data with the following format.
 
 | Start byte | Stop byte        | Name         | Type   | Description                  |
 |------------|------------------|--------------|--------|------------------------------|
-| 0          | 3                | signals_lost | uint32 | Signals lost since last read |
-| 4          | 11               | signal_id    | uint64 | Unique signal ID             |
-| 12         | 15               | payload_size | uint32 | Payload size                 |
+| 0          | 3                | signals\_lost | uint32 | Signals lost since last read |
+| 4          | 11               | signal\_id    | uint64 | Unique signal ID             |
+| 12         | 15               | payload\_size | uint32 | Payload size                 |
 | 16         | 16+$payload_size | payload      | data   | Payload                      |
 
 * **`signals_lost`**  
@@ -257,8 +260,8 @@ Each read from a sigfs signal file will return data with the following format.
 * **`signal_id`**  
     Specifies a unique ID for the returned signal.  
     The signal ID will never be repeated for the same signal file for
-    as long as the `sigfs` process is running.  The same signal ID may
-    be used in two different signal files.
+    as long as the `sigfs` process is running.  Please note that the
+    same signal ID may be used in two different signal files.
     
 * **`payload_size`**  
     Specifies the number of bytes of the subsequent payload.
@@ -281,7 +284,7 @@ The sigfs signal file is opened as with any regular file, using the
 write-only flag to disable reading. Do not use the append flag.
 
 
-    fd = open("./sigfs-dir/my-signal-file", O_RDONLY);
+    fd = open("./sigfs/my-signal-file", O_RDONLY);
 
 The returned file descriptor can be written to in order to 
 

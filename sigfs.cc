@@ -20,14 +20,21 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <iostream>
 #include "log.h"
 #include "queue_impl.hh"
 #include "subscriber.hh"
 #include <limits.h>
+#include <getopt.h>
+#include <fstream>
+#include "fs.hh"
 
 using namespace sigfs;
 
+
+// Globals for the win
 Queue* g_queue(0);
+std::shared_ptr<FileSystem> g_fsys;
 
 
 static int check_fuse_call(int index, int fuse_result, const char* fmt, ...)
@@ -53,41 +60,41 @@ static int check_fuse_call(int index, int fuse_result, const char* fmt, ...)
 }
 
 
-static void print_file_info(const char* prefix, struct fuse_file_info* fi)
+static void print_file_info(const char* prefix, uint32_t flags)
 {
     if (_sigfs_log_level != SIGFS_LOG_LEVEL_DEBUG)
         return;
 
     char res[1025];
-    sprintf(res, "%s  flags[%.8X]:", prefix, fi->flags);
-    if (fi->flags & O_CREAT) strcat(res, " O_CREAT");
-    if (fi->flags & O_EXCL) strcat(res, " O_EXCL");
-    if (fi->flags & O_TRUNC) strcat(res, " O_TRUNC");
-    if (fi->flags & O_NONBLOCK) strcat(res, " O_NONBLOCK");
-    if (fi->flags & O_DSYNC) strcat(res, " O_DSYNC");
-    if (fi->flags & FASYNC) strcat(res, " FASYNC(!!)");
+    sprintf(res, "%s  flags[%.8X]:", prefix, flags);
+    if (flags & O_CREAT) strcat(res, " O_CREAT");
+    if (flags & O_EXCL) strcat(res, " O_EXCL");
+    if (flags & O_TRUNC) strcat(res, " O_TRUNC");
+    if (flags & O_NONBLOCK) strcat(res, " O_NONBLOCK");
+    if (flags & O_DSYNC) strcat(res, " O_DSYNC");
+    if (flags & FASYNC) strcat(res, " FASYNC(!!)");
 #ifdef O_LARGEFILE
-    if (fi->flags & O_LARGEFILE) strcat(res, " O_LARGEFILE");
+    if (flags & O_LARGEFILE) strcat(res, " O_LARGEFILE");
 #endif
-    if (fi->flags & O_DIRECTORY) strcat(res, " O_DIRECTORY");
+    if (flags & O_DIRECTORY) strcat(res, " O_DIRECTORY");
 #ifdef O_DIRECT
-    if (fi->flags & O_DIRECT) strcat(res, " O_DIRECT");
+    if (flags & O_DIRECT) strcat(res, " O_DIRECT");
 #endif
-    if (fi->flags & O_NOFOLLOW) strcat(res, " O_NOFOLLOW");
+    if (flags & O_NOFOLLOW) strcat(res, " O_NOFOLLOW");
 #ifdef O_NOATIME
-    if (fi->flags & O_NOATIME) strcat(res, " O_NOATIME");
+    if (flags & O_NOATIME) strcat(res, " O_NOATIME");
 #endif
-    if (fi->flags & O_CLOEXEC) strcat(res, " O_CLOEXEC");
-    if (fi->flags & O_NONBLOCK) strcat(res, " O_NONBLOCK");
+    if (flags & O_CLOEXEC) strcat(res, " O_CLOEXEC");
+    if (flags & O_NONBLOCK) strcat(res, " O_NONBLOCK");
 #ifdef O_PATH
-    if (fi->flags & O_PATH) strcat(res, " O_PATH");
+    if (flags & O_PATH) strcat(res, " O_PATH");
 #endif
-    if (fi->flags & O_NOCTTY) strcat(res, " O_NOCTTY");
-    if (fi->flags & O_RDONLY) strcat(res, " O_RDONLY");
-    if (fi->flags & O_WRONLY) strcat(res, " O_WRONLY");
-    if (fi->flags & O_RDWR) strcat(res, " O_RDWR");
-    if (fi->flags & O_EXCL) strcat(res, " O_EXCL");
-    if (fi->flags & O_APPEND) strcat(res, " O_APPEND");
+    if (flags & O_NOCTTY) strcat(res, " O_NOCTTY");
+    if (flags & O_RDONLY) strcat(res, " O_RDONLY");
+    if (flags & O_WRONLY) strcat(res, " O_WRONLY");
+    if (flags & O_RDWR) strcat(res, " O_RDWR");
+    if (flags & O_EXCL) strcat(res, " O_EXCL");
+    if (flags & O_APPEND) strcat(res, " O_APPEND");
     SIGFS_LOG_DEBUG(res);
 }
 
@@ -110,71 +117,121 @@ static void do_destroy(void* userdata)
     SIGFS_LOG_DEBUG("do_destroy(): Called");
 }
 
-static void do_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
+void setup_stat(std::shared_ptr<FileSystem::INode> entry, uid_t uid, gid_t gid, struct stat* attr)
 {
-	struct fuse_entry_param e;
+    bool can_read(false);
+    bool can_write(false);
 
-        SIGFS_LOG_DEBUG("do_lookup(): %s", name);
-	if (parent != 1 || strcmp(name, "signal") != 0) {
-            check_fuse_call(SIGFS_NIL_INDEX,
-                            fuse_reply_err(req, ENOENT),
-                            "do_lookup(): fuse_reply_err(req, ENOENT) returned: ");
-        }
-	else {
-            memset(&e, 0, sizeof(e));
-            e.ino = 2;
-            e.attr_timeout = 1.0;
-            e.entry_timeout = 1.0;
-            e.attr.st_mode = S_IFREG | 0644;
-            e.attr.st_nlink = 1;
+    entry->get_access(uid, gid, can_read, can_write);
 
+    // Do we have a directory
+    if (typeid(*entry) == typeid(FileSystem::Directory)) {
+        attr->st_mode = S_IFDIR;
+        if (can_read)
+            attr->st_mode |= (S_IRUSR | S_IXUSR);
 
-            check_fuse_call(SIGFS_NIL_INDEX,
-                            fuse_reply_entry(req, &e),
-                            "do_lookup(): fuse_reply_entry() returned: ");
+        if (can_write)
+            attr->st_mode |= S_IWUSR;
 
-	}
+        attr->st_nlink = 2;
+        SIGFS_LOG_DEBUG("setup_stat(%s): Directory: uid[%u] gid[%u] can_read[%c] can_write[%c] -> st_mode[%o]",
+                        entry->name().c_str(), uid, gid,
+                        (can_read?'Y':'N'),
+                        (can_write?'Y':'N'),
+                        attr->st_mode);
+    }
+    // Else we have a file
+    else {
+        attr->st_mode = S_IFREG;
+
+        if (can_read)
+            attr->st_mode |= S_IRUSR;
+
+        if (can_write)
+            attr->st_mode |= S_IWUSR;
+
+        // Directory access is not reflected in file access bitmap.
+        attr->st_nlink = 1;
+        SIGFS_LOG_DEBUG("setup_stat(%s): File: uid[%u] gid[%u] can_read[%c] can_write[%c] -> st_mode[%o]",
+                        entry->name().c_str(), uid, gid,
+                        (can_read?'Y':'N'),
+                        (can_write?'Y':'N'),
+                        attr->st_mode);
+    }
+
+    attr->st_ino = entry->inode();
+    attr->st_uid = uid;
+    attr->st_gid = gid;
+    attr->st_mtime = attr->st_atime = time(0);
 }
 
-static void do_getattr(fuse_req_t req, fuse_ino_t ino,
-                       struct fuse_file_info *fi)
+static void do_lookup(fuse_req_t req, fuse_ino_t dir_ino, const char *name)
 {
-    SIGFS_LOG_DEBUG( "do_getattr(%lu): Called" , ino);
-    struct stat st{}; // Init to default values (== 0)
+    struct fuse_entry_param e;
+    auto dir = std::dynamic_pointer_cast<FileSystem::Directory>(g_fsys->lookup_inode(dir_ino));
 
-    (void) fi;
+    SIGFS_LOG_DEBUG("do_lookup( dir_inode: %lu, entry_name: %s): Called", dir_ino, name);
 
-    st.st_ino = ino;
-    st.st_uid = getuid();
-    st.st_gid = getgid();
-    st.st_atime = time(0);
-    st.st_mtime = time(0);
+    if (dir == nullptr) {
+        auto entry = g_fsys->lookup_inode(dir_ino);
+        SIGFS_LOG_ERROR("do_lookup(inode: %lu, name: %s, entry_name: %s): Parent not directory. JSON:\n%s\n",
+                        dir_ino, entry->name().c_str(), name, entry->to_config().dump(4).c_str());
+        abort();
+    }
 
-    switch (ino) {
-    case 1: // ROot inode "/"
-        st.st_mode = S_IFDIR | 0755;
-        st.st_nlink = 2;
-        break;
+    // Lookup entry
+    auto entry = dir->lookup_entry(name);
 
-    case 2: // Signal inode "/signal"
-        st.st_mode = S_IFREG | 0644;
-        st.st_nlink = 1;
-        break;
-
-    default:
+    // Not found?
+    if (!entry) {
         check_fuse_call(SIGFS_NIL_INDEX,
                         fuse_reply_err(req, ENOENT),
-                        "do_getattr(): fuse_reply_err(ENOENT) returned: ");
+                        "do_lookup(inode: %lu, name: %s): fuse_reply_err(req, ENOENT) returned: ", dir_ino, name);
         return;
     }
 
+    // Found
+    memset(&e, 0, sizeof(e));
+    e.ino = entry->inode();
+    e.attr_timeout = 1.0;
+    e.entry_timeout = 1.0;
+
+    // Get extended context
+    const struct fuse_ctx* ctx = fuse_req_ctx(req);
+
+    // Make it look like the caller is the owner.
+    setup_stat(entry, ctx->uid, ctx->gid, &e.attr);
+
+
+    SIGFS_LOG_DEBUG("do_lookup( dir_inode: %lu, entry_name: %s): Attributes: 0%o", dir_ino, name, e.attr.st_mode);
 
     check_fuse_call(SIGFS_NIL_INDEX,
-                    fuse_reply_attr(req, &st, 1.0), // No idea about a good timeout value
-                    "do_getattr(): fuse_reply_attr(ENOENT) returned: ");
-
-    SIGFS_LOG_DEBUG("do_getattr(): Inode [%lu] not supported. Return ENOENT", ino);
+                    fuse_reply_entry(req, &e),
+                    "do_lookup(): fuse_reply_entry() returned: ");
     return;
+}
+
+static void do_getattr(fuse_req_t req, fuse_ino_t entry_ino, struct fuse_file_info *fi)
+{
+    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): Called" , entry_ino);
+    struct stat st {}; // Init to default values (== 0)
+
+    auto entry = g_fsys->lookup_inode(entry_ino);
+    const struct fuse_ctx* ctx = fuse_req_ctx(req);
+    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): Resolved to: %s" , entry_ino, entry->name().c_str());
+
+    (void) fi;
+
+    // Make it look like the caller is the owner.
+    setup_stat(entry, ctx->uid, ctx->gid, &st);
+
+    int res = fuse_reply_attr(req, &st, 1.0);
+    check_fuse_call(SIGFS_NIL_INDEX,
+                    res,
+                    "do_getattr( dir_inode: %lu, entry_name: %s): Failed", entry_ino, entry->name().c_str());
+
+    return;
+
 }
 
 //
@@ -217,26 +274,38 @@ static void dirbuf_add(fuse_req_t req, struct dirbuf *b, const char *name, fuse_
 	fuse_add_direntry(req, b->p + oldsize, b->size - oldsize, name, &stbuf, b->size);
 }
 
-static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
+static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
                       off_t off, struct fuse_file_info *fi)
 {
-//    SIGFS_LOG_DEBUG("do_readdir(): Called.");
-    (void) fi;
-    if (ino != 1) {
+    SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu): Called", dir_inode);
+    auto dir = std::dynamic_pointer_cast<FileSystem::Directory>(g_fsys->lookup_inode(dir_inode));
+
+    // g_fsys->lookup_inode() will termiante program if inode not found.
+    // If we have a null pointer here, it is because dymaic cast is failing due to
+    // the fact that we are trying to read the directory entries of a file
+    //
+    if (dir == nullptr) {
+        SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu): Inode is not a directory.\n", dir_inode);
         fuse_reply_err(req, ENOTDIR);
         return;
     }
+
+    (void) fi;
     struct dirbuf b;
 
     memset(&b, 0, sizeof(b));
-    dirbuf_add(req, &b, ".", 1);
-    dirbuf_add(req, &b, "..", 1);
-    dirbuf_add(req, &b, "signal", 2);
+    dirbuf_add(req, &b, ".", dir_inode);
+    dirbuf_add(req, &b, "..", dir->parent_inode());
+
+    dir->for_each_entry([&dir_inode, &req, &b, &dir](const std::shared_ptr<FileSystem::INode> entry) {
+        SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu, dir_name: %s): Adding entry %s", dir_inode, dir->name().c_str(), entry->name().c_str());
+        dirbuf_add(req, &b, entry->name().c_str(), entry->inode());
+    });
     check_fuse_call(SIGFS_NIL_INDEX,
                     reply_buf_limited(req, b.p, b.size, off, size),
                     "do_readdir(): reply_buf_limited() returned: ");
 
-    SIGFS_LOG_DEBUG("do_readdir(): Returning root entry \"signal\".");
+    SIGFS_LOG_DEBUG("do_readdir(): Done.");
 
     free(b.p);
     return;
@@ -247,7 +316,7 @@ static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
 static void do_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
     SIGFS_LOG_DEBUG("do_open(%lu): Called", ino );
-    print_file_info("do_open():", fi);
+    print_file_info("do_open():", fi->flags);
     if (ino != 2) {
         fuse_reply_err(req, EISDIR);
         return;
@@ -542,12 +611,86 @@ static void dummy_log(fuse_log_level level, const char *fmt, va_list ap)
     sigfs_log(level_map[level], "FUSE", "[fuse]", 0, SIGFS_NIL_INDEX, buf);
 }
 
+void usage(const char* name)
+{
+    std::cout << "Usage: " << name << " -c <config-file.json> | --config=<config-file.json> <mount-directory>" << std::endl;
+    std::cout << "         -c <config-file.json>  The JSON configuration file to load." << std::endl;
+//    std::cout << "        -f <file> | --file=<file>" << std::endl;
+//    std::cout << "        -c <signal-count> | --count=<signal-count>" << std::endl;
+//    std::cout << "        -s <usec> | --sleep=<usec>" << std::endl;
+//    std::cout << "-c <signal-count> How many signals to send." << std::endl;
+//    std::cout << "-s <usec>         How many microseconds to sleep between each send." << std::endl;
+//    std::cout << "-d <data>         Data to publish. \"%d\" will be replaced with counter." << std::endl;
+//    std::cout << "-h                Print data in hex. Default is to print escaped strings." << std::endl;
+}
 
 // Nil functions that we don't want to pollute the source file with
-//#include "sigfs_inc.cc"
 
-int main( int argc, char *argv[] )
+int main( int argc,  char **argv )
 {
+    std::string config_file("fs.json");
+    int ch = 0;
+    static struct option long_options[] =  {
+        {"config", required_argument, NULL, 'c'},
+        {NULL, 0, NULL, 0}
+    };
+
+    //
+    // loop over all of the options
+    //
+    while ((ch = getopt_long(argc, argv, "c:", long_options, NULL)) != -1) {
+        // check to see if a single character or long option came through
+        switch (ch)
+        {
+        case 'c':
+            config_file = optarg;
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    if (config_file.size() == 0) {
+        std::cout << std::endl << "Missing argument: -c <config.json>" << std::endl << std::endl;
+        usage(argv[0]);
+        exit(255);
+    }
+
+    g_fsys = std::make_shared<FileSystem>(json::parse(std::ifstream(config_file)));
+    struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+    struct fuse_session *se;
+    struct fuse_cmdline_opts opts;
+    struct fuse_loop_config config;
+    int ret = -1;
+
+    g_queue = new Queue(32768*512);
+
+    if (fuse_parse_cmdline(&args, &opts) != 0) {
+        puts("No mopre");
+        return 1;
+    }
+
+    if (opts.show_help) {
+        printf("usage: %s [options] <mountpoint>\n\n", argv[0]);
+        fuse_cmdline_help();
+        fuse_lowlevel_help();
+        ret = 0;
+        goto err_out1;
+    } else if (opts.show_version) {
+        printf("FUSE library version %s\n", fuse_pkgversion());
+        fuse_lowlevel_version();
+        ret = 0;
+        goto err_out1;
+    }
+
+    if(opts.mountpoint == NULL) {
+        printf("usage: %s [options] <mountpoint>\n", argv[0]);
+        printf("       %s --help\n", argv[0]);
+        ret = 1;
+        goto err_out1;
+    }
+
     static struct fuse_lowlevel_ops operations = {
 /*
           .readlink    = do_readlink,
@@ -597,36 +740,6 @@ int main( int argc, char *argv[] )
     };
 
 
-    struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-    struct fuse_session *se;
-    struct fuse_cmdline_opts opts;
-    struct fuse_loop_config config;
-    int ret = -1;
-
-    g_queue = new Queue(32768*512);
-
-    if (fuse_parse_cmdline(&args, &opts) != 0)
-        return 1;
-    if (opts.show_help) {
-        printf("usage: %s [options] <mountpoint>\n\n", argv[0]);
-        fuse_cmdline_help();
-        fuse_lowlevel_help();
-        ret = 0;
-        goto err_out1;
-    } else if (opts.show_version) {
-        printf("FUSE library version %s\n", fuse_pkgversion());
-        fuse_lowlevel_version();
-        ret = 0;
-        goto err_out1;
-    }
-
-    if(opts.mountpoint == NULL) {
-        printf("usage: %s [options] <mountpoint>\n", argv[0]);
-        printf("       %s --help\n", argv[0]);
-        ret = 1;
-        goto err_out1;
-    }
-
     fuse_set_log_func(dummy_log);
     se = fuse_session_new(&args, &operations, sizeof(operations), NULL);
     if (se == NULL)
@@ -638,6 +751,7 @@ int main( int argc, char *argv[] )
     if (fuse_session_mount(se, opts.mountpoint) != 0)
         goto err_out3;
 
+    opts.foreground = 1;
     fuse_daemonize(opts.foreground);
     // Move us back from root directory.
     /* Block until ctrl+c or fusermount -u */

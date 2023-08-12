@@ -1,0 +1,35 @@
+{
+    "root": {
+        "name": "/",
+        "uid_access": [
+            {
+                "uid": 1000,
+                "access": [ "read", "inherit" ]
+            }
+        ],
+        "gid_access": [],
+        "entries": [
+            { "name": "f1" },
+            {
+                "name": "s1",
+                "entries": [
+                    { "name": "f1" },
+                    { "name": "f2" },
+                    { "name": "f3" },
+                    { "name": "s1",
+                      "gid_access": [
+                          {
+                              "gid": 1000,
+                              "access": [ "write" ]
+                          }
+                      ],
+                      "entries": [
+                          { "name": "f1" },
+                          { "name": "f2" }
+                      ]
+                    }
+                ]
+            }
+        ]
+    }
+}
