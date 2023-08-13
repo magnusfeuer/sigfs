@@ -16,7 +16,9 @@ FileSystem::File::File(FileSystem& owner, const json& config):
 {
 }
 
-json FileSystem::File::to_config(void) const {
+json FileSystem::File::to_config(void) const
+{
+    std::cout << "YES" << std::endl;
     json res(INode::to_config());
 
     res["type"] = "directory";

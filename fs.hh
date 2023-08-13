@@ -130,29 +130,13 @@ namespace sigfs {
         //
         class INode {
         public:
-            INode(FileSystem& owner, const json & config):
-                name_(config["name"]),
-                inode_(owner.get_next_inode()),
-                uid_access_(UIDAccessControlMap(config["uid_access"])),
-                gid_access_(GIDAccessControlMap(config["gid_access"]))
-            {
-            }
-
-            virtual json to_config(void) const {
-                return json( {
-                        { "name", name_ },
-                        { "uid_access", uid_access_.to_config() },
-                        { "gid_access", gid_access_.to_config() }
-                    } );
-            }
+            INode(FileSystem& owner, const json & config);
+            virtual json to_config(void) const;
 
             bool read_access(uid_t uid, gid_t gid) const;
             bool write_access(uid_t uid, gid_t gid) const;
 
-            const std::string name(void) const {
-                return name_;
-            }
-
+            const std::string name(void) const;
             virtual bool add(const INode&& fs_obj) = 0;
 
         private:
@@ -165,35 +149,14 @@ namespace sigfs {
 
         class Directory: public INode {
         public:
-
             Directory(FileSystem& owner, const json &config);
-
-            json to_config(void) const {
-                json res(INode::to_config());
-
-                res["type"] = "directory";
-                res["children"] = children_.to_config();
-                return res;
-            }
-
-            bool add(const INode&& fs_obj) {
-                children_.insert(std::pair<const std::string, const INode&>(fs_obj.name(), std::move(fs_obj)));
-                return true;
-            };
+            json to_config(void) const;
+            bool add(const INode&& fs_obj);
 
         private:
             class Children: public std::map<const std::string, const INode&> {
             public:
-                json to_config(void) const {
-                    json lst = json::array();
-
-                    // There is probably a more elegant way of doing this.
-                    for(auto elem: *this) {
-                        lst.push_back(elem.second.to_config());;
-                    }
-
-                    return lst;
-                }
+                json to_config(void) const;
             };
 
             Children children_;

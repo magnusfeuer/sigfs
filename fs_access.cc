@@ -10,31 +10,24 @@
 #include "fs.hh"
 
 using namespace sigfs;
-FileSystem::Access::Access(const json & config)
+FileSystem::Access::Access(const json & config):
+    read_access_(config.contains("read")),
+    write_access_(config.contains("write"))
 {
-
-    auto rd_access(config.find(("read")));
-    auto wr_access(config.find(("write")));
-
-    if (rd_access != config.end())
-        read_access_ = rd_access.value();
-    else
-        read_access_ = false;
-
-    if (wr_access != config.end())
-        write_access_ = wr_access.value();
-    else
-        write_access_ = false;
 }
+
 
 json FileSystem::Access::to_config(void) const
 {
-    return json(
-        {
-            { "read", read_access_ },
-            { "write", write_access_ }
-        }
-        );
+    json res = json::array();
+
+    if (read_access_)
+        res.push_back("read");
+
+    if (write_access_)
+        res.push_back("write");
+
+    return res;
 };
 
 bool FileSystem::Access::read_access(void) const
@@ -61,9 +54,11 @@ json FileSystem::UIDAccessControlMap::to_config(void) const
     json lst = json::array();
 
     // There is probably a more elegant way of doing this.
-    for(auto elem: *this) 
-        lst.push_back(json ( { { "uid", elem.first },
-                               { "access", elem.second.to_config() } } ));;
+    for(auto elem: *this)
+        lst.push_back(json ( {
+                    { "uid", elem.first },
+                    { "access", elem.second.to_config() }
+                } ) );
 
     return lst;
 };
@@ -82,9 +77,12 @@ json FileSystem::GIDAccessControlMap::to_config(void) const
     json lst = json::array();
 
     // There is probably a more elegant way of doing this.
-    for(auto elem: *this) 
-        lst.push_back(json ( { { "gid", elem.first },
-                               { "access", elem.second.to_config() } } ));;
+    for(auto elem: *this) {
+        lst.push_back(json ( {
+                    { "gid", elem.first },
+                    { "access", elem.second.to_config() }
+                } ));;
 
+    }
     return lst;
 };

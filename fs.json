@@ -3,10 +3,19 @@
     "root": {
         "type": "directory",
         "name": "/",
-        "uid_access": [],
-        "gid_access": []
-        "children": [
+        "uid_access": [
+            {
+                "uid": 1000,
+                "access": [ "read" ]
+            }
         ],
+        "gid_access": [],
+        "children": [
+            {
+                "name": "speed",
+                "type": "file"
+            }
+        ]
     }
 }
 
