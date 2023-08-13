@@ -40,33 +40,11 @@ namespace sigfs {
         // Default value for "write" is false
         class Access {
         public:
-            Access(const json & config) {
+            Access(const json & config);
+            json to_config(void) const;
 
-                auto rd_access(config.find(("read")));
-                auto wr_access(config.find(("write")));
-
-                if (rd_access != config.end())
-                    read_access_ = rd_access.value();
-                else
-                    read_access_ = false;
-
-                if (wr_access != config.end())
-                    write_access_ = wr_access.value();
-                else
-                    write_access_ = false;
-            }
-
-            json to_config(void) const {
-                return json(
-                    {
-                        { "read", read_access_ },
-                        { "write", write_access_ }
-                    }
-                    );
-            };
-
-            bool read_access(void) const { return read_access_; }
-            bool write_access(void) const { return write_access_; }
+            bool read_access(void) const;
+            bool write_access(void) const;
 
         private:
             bool read_access_ = false; // Default init for extra security
@@ -99,23 +77,9 @@ namespace sigfs {
         //
         class UIDAccessControlMap: public std::map<uid_t, Access> {
         public:
-            UIDAccessControlMap(const json & config){
-                std::cout << config << std::endl;
-                for(auto elem: config) {
-                    insert(std::pair<uid_t, Access>(elem["uid"], elem["access"]));
-                }
-            }
+            UIDAccessControlMap(const json & config);
 
-            json to_config(void) const {
-                json lst = json::array();
-
-                // There is probably a more elegant way of doing this.
-                for(auto elem: *this) 
-                    lst.push_back(json ( { { "uid", elem.first },
-                                           { "access", elem.second.to_config() } } ));;
-
-                return lst;
-            };
+            json to_config(void) const;
         };
 
         // Access control map for Group IDs
@@ -141,22 +105,8 @@ namespace sigfs {
         //
         class GIDAccessControlMap: public std::map<gid_t, Access> {
         public:
-            GIDAccessControlMap(const json & config) {
-                for(auto elem: config) {
-                    insert(std::pair<gid_t, Access>(elem["gid"], elem["access"]));
-                }
-            }
-
-            json to_config(void) const {
-                json lst = json::array();
-
-                // There is probably a more elegant way of doing this.
-                for(auto elem: *this) 
-                    lst.push_back(json ( { { "gid", elem.first },
-                                           { "access", elem.second.to_config() } } ));;
-
-                return lst;
-            };
+            GIDAccessControlMap(const json & config);
+            json to_config(void) const;
         };
 
         //
@@ -178,9 +128,9 @@ namespace sigfs {
         //   ]
         // }
         //
-        class FileSystemObject {
+        class INode {
         public:
-            FileSystemObject(FileSystem& owner, const json & config):
+            INode(FileSystem& owner, const json & config):
                 name_(config["name"]),
                 inode_(owner.get_next_inode()),
                 uid_access_(UIDAccessControlMap(config["uid_access"])),
@@ -203,7 +153,7 @@ namespace sigfs {
                 return name_;
             }
 
-            virtual bool add(const FileSystemObject&& fs_obj) = 0;
+            virtual bool add(const INode&& fs_obj) = 0;
 
         private:
             const std::string name_;
@@ -213,26 +163,26 @@ namespace sigfs {
         };
 
 
-        class Directory: public FileSystemObject {
+        class Directory: public INode {
         public:
 
             Directory(FileSystem& owner, const json &config);
 
             json to_config(void) const {
-                json res(FileSystemObject::to_config());
+                json res(INode::to_config());
 
                 res["type"] = "directory";
                 res["children"] = children_.to_config();
                 return res;
             }
 
-            bool add(const FileSystemObject&& fs_obj) {
-                children_.insert(std::pair<const std::string, const FileSystemObject&>(fs_obj.name(), std::move(fs_obj)));
+            bool add(const INode&& fs_obj) {
+                children_.insert(std::pair<const std::string, const INode&>(fs_obj.name(), std::move(fs_obj)));
                 return true;
             };
 
         private:
-            class Children: public std::map<const std::string, const FileSystemObject&> {
+            class Children: public std::map<const std::string, const INode&> {
             public:
                 json to_config(void) const {
                     json lst = json::array();
@@ -250,26 +200,15 @@ namespace sigfs {
         };
 
         // Currently no extra members in addition to those
-        // provided by FileSystemObject
+        // provided by INode
         //
-        class File: public FileSystemObject {
+        class File: public INode {
         public:
-            File(FileSystem& owner, const json& config):
-                FileSystemObject(owner, config)
-            {
-            }
+            File(FileSystem& owner, const json& config);
 
-            json to_config(void) const {
-                json res(FileSystemObject::to_config());
+            json to_config(void) const;
 
-                res["type"] = "directory";
-                return res;
-            }
-
-
-            virtual bool add(const FileSystemObject&& fs_obj) {
-                abort(); // TODO - Exception handling.
-            }
+            bool add(const INode&& fs_obj);
 
         private:
         };
@@ -277,18 +216,9 @@ namespace sigfs {
     public:
         FileSystem(const json &config);
 
-        const ino_t get_next_inode(void) {
-            return next_inode_++;
-        }
+        const ino_t get_next_inode(void) { return next_inode_++; }
 
-
-        json to_config(void) const {
-            json res;
-
-            res["root"] = root_.to_config();
-            res["inherit_access_rights"] = inherit_access_rights_;
-            return res;
-        }
+        json to_config(void) const;
 
     private:
         static constexpr int DEFAULT_ROOT_INODE = 2; // As per Linux tradition

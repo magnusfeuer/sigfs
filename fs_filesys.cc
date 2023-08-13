@@ -7,7 +7,7 @@
 //
 
 
-#include "fstree.hh"
+#include "fs.hh"
 
 using namespace sigfs;
 
@@ -17,3 +17,11 @@ FileSystem::FileSystem(const nlohmann::json& config):
 {
 }
 
+json FileSystem::to_config(void) const
+{
+    json res;
+
+    res["root"] = root_.to_config();
+    res["inherit_access_rights"] = inherit_access_rights_;
+    return res;
+}

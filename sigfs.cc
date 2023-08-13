@@ -27,7 +27,7 @@
 #include <limits.h>
 #include <getopt.h>
 
-#include "fstree.hh"
+#include "fs.hh"
 
 using namespace sigfs;
 

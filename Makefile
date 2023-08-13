@@ -4,7 +4,7 @@
 
 .PHONY: all clean debug install install-examples install-test uninstall test examples
 
-HDR=queue.hh subscriber.hh sigfs_common.h log.h queue_impl.hh fstree.hh
+HDR=queue.hh subscriber.hh sigfs_common.h log.h queue_impl.hh fs.hh
 
 
 INCLUDES=-I./json/include $(shell pkg-config fuse3 --cflags)
@@ -12,11 +12,11 @@ INCLUDES=-I./json/include $(shell pkg-config fuse3 --cflags)
 #
 # Signal FS main process
 #
-SIGFS_SRC=fstree_filesystem.cc fstree_directory.cc fstree_file.o fstree_fsobject.cc sigfs.cc log.cc queue.cc 
+SIGFS_SRC=fs_filesys.cc fs_dir.cc fs_file.o fs_inode.cc sigfs.cc log.cc queue.cc fs_access.cc
 SIGFS_OBJ=${patsubst %.cc, %.o, ${SIGFS_SRC}}
 SIGFS=sigfs
 
-SIGFS_TEST_SRC=fstree_test.cc fstree_filesystem.cc fstree_fsobject.cc fstree_directory.cc fstree_file.cc
+SIGFS_TEST_SRC=fs_test.cc fs_filesys.cc fs_inode.cc fs_dir.cc fs_file.cc fs_access.cc
 SIGFS_TEST_OBJ=${patsubst %.cc, %.o, ${SIGFS_TEST_SRC}}
 SIGFS_TEST=sigfs_test
 

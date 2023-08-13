@@ -7,7 +7,7 @@
 //
 
 
-#include "fstree.hh"
+#include "fs.hh"
 
 using namespace sigfs;
 

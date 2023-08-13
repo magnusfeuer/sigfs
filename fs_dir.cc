@@ -7,13 +7,13 @@
 //
 
 
-#include "fstree.hh"
+#include "fs.hh"
 #include <iostream>
 
 using namespace sigfs;
 
 FileSystem::Directory::Directory(FileSystem& owner, const json& config):
-    FileSystemObject(owner, config)
+    INode(owner, config)
 {
 
     std::cout << "Directory: " << config.dump(4) << std::endl;
@@ -23,10 +23,10 @@ FileSystem::Directory::Directory(FileSystem& owner, const json& config):
         const std::string name(child["name"]);
 
         if (type == "directory") {
-            children_.insert(std::pair<const std::string, const FileSystemObject&>(name, Directory(owner, child)));
+            children_.insert(std::pair<const std::string, const INode&>(name, Directory(owner, child)));
         }
         else {
-            children_.insert(std::pair<const std::string, const FileSystemObject&>(name, File(owner, child)));
+            children_.insert(std::pair<const std::string, const INode&>(name, File(owner, child)));
         }
     }
 }
