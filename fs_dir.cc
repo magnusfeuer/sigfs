@@ -24,10 +24,12 @@ FileSystem::Directory::Directory(FileSystem& owner, const json& config):
 
         // TODO: Replace with FileSystem factory.
         if (type == "directory") {
-            children_.insert(std::pair<const std::string, const INode&>(name, std::move(Directory(owner, child))));
+//            children_.insert(std::pair<const std::string, std::reference_wrapper<const INode> >(name, std::cref(Directory(owner, child))));
+            children_.insert(std::pair<const std::string, const INode&&> (name, std::move(Directory(owner, child))));
         }
         else if (type == "file") {
-            children_.insert(std::pair<const std::string, const INode&>(name, std::move(File(owner, child))));
+            children_.insert(std::pair<const std::string, const INode&&> (name, File(owner, child)));
+//            children_.insert(std::pair<const std::string, std::reference_wrapper<const INode> >(name, std::cref(File(owner, child))));
         } else {
             std::cout << "Unknown inode type: " << type << std::endl;
             abort();
@@ -45,11 +47,6 @@ json FileSystem::Directory::to_config(void) const
     res["children"] = children_.to_config();
     return res;
 }
-
-bool FileSystem::Directory::add(const INode&& fs_obj) {
-    children_.insert(std::pair<const std::string, const INode&>(fs_obj.name(), std::move(fs_obj)));
-    return true;
-};
 
 json FileSystem::Directory::Children::to_config(void) const
 {

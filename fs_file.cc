@@ -25,8 +25,4 @@ json FileSystem::File::to_config(void) const
     return res;
 }
 
-bool FileSystem::File::add(const INode&& fs_obj)
-{
-    abort(); // TODO - Exception handling.
-}
 

@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
 #include <iostream>
+#include <variant>
 
 using json=nlohmann::json;
 namespace sigfs {
@@ -137,7 +138,6 @@ namespace sigfs {
             bool write_access(uid_t uid, gid_t gid) const;
 
             const std::string name(void) const;
-            virtual bool add(const INode&& fs_obj) = 0;
 
         private:
             const std::string name_;
@@ -147,20 +147,6 @@ namespace sigfs {
         };
 
 
-        class Directory: public INode {
-        public:
-            Directory(FileSystem& owner, const json &config);
-            json to_config(void) const;
-            bool add(const INode&& fs_obj);
-
-        private:
-            class Children: public std::map<const std::string, const INode&> {
-            public:
-                json to_config(void) const;
-            };
-
-            Children children_;
-        };
 
         // Currently no extra members in addition to those
         // provided by INode
@@ -171,9 +157,21 @@ namespace sigfs {
 
             json to_config(void) const;
 
-            bool add(const INode&& fs_obj);
+        private:
+        };
+
+
+        class Directory: public INode {
+        public:
+            Directory(FileSystem& owner, const json &config);
+            json to_config(void) const;
 
         private:
+            class Children: public std::map<const std::string, const INode > {
+            public:
+                json to_config(void) const;
+            };
+            Children children_;
         };
 
     public:
