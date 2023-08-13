@@ -8,12 +8,11 @@
 
 
 #include "fstree.hh"
-#include <nlohmann/json.hpp>
 
 using namespace sigfs;
 
 FileSystem::FileSystem(const nlohmann::json& config):
-    root_(config["root"], 2, next_inode_), // Initialize root recursively with config data
+    root_(*this, config["root"]), // Initialize root recursively with config data
     inherit_access_rights_(config.value("inherit_access_rights", false))
 {
 }

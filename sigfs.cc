@@ -25,7 +25,6 @@
 #include "queue_impl.hh"
 #include "subscriber.hh"
 #include <limits.h>
-#include "config.hh"
 #include <getopt.h>
 
 #include "fstree.hh"

@@ -8,29 +8,25 @@
 
 
 #include "fstree.hh"
-#include <nlohmann/json.hpp>
+#include <iostream>
 
 using namespace sigfs;
 
-Directory::Directory(const nlohmann::json& config, const ino_t inode, ino_t& next_inode):
-                     FileSystemObject(config, inode, next_inode)
+FileSystem::Directory::Directory(FileSystem& owner, const json& config):
+    FileSystemObject(owner, config)
 {
 
-    ino_t current_ino = next_inode; // As initialized by FileSystemObject
-    ino_t nxt_ino = 0; //
-    for(auto file: config["files"]) {
-        const std::string name(file["name"]);
+    std::cout << "Directory: " << config.dump(4) << std::endl;
 
-        children_.insert(std::pair<const std::string, const FileSystemObject&>(name, File(file, current_ino, nxt_ino)));
-        current_ino = nxt_ino;
+    for(auto child: config["children"]) {
+        const std::string type(child["type"]);
+        const std::string name(child["name"]);
+
+        if (type == "directory") {
+            children_.insert(std::pair<const std::string, const FileSystemObject&>(name, Directory(owner, child)));
+        }
+        else {
+            children_.insert(std::pair<const std::string, const FileSystemObject&>(name, File(owner, child)));
+        }
     }
-
-    for(auto dir: config["directories"]) {
-        const std::string name(dir["name"]);
-
-        children_.insert(std::pair<const std::string, const FileSystemObject&>(name, Directory(dir, current_ino, nxt_ino)));
-        current_ino = nxt_ino;
-    }
-    // Setup return value 
-    next_inode = current_ino;
 }

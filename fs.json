@@ -1,0 +1,13 @@
+{
+    "inherit_access_rights": true,
+    "root": {
+        "type": "directory",
+        "name": "/",
+        "uid_access": [],
+        "gid_access": []
+        "children": [
+        ],
+    }
+}
+
+        

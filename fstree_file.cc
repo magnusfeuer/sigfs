@@ -1,4 +1,4 @@
-// Copyright (C) 2022, Magnus Feuer
+// Copyright (C) 2023, Magnus Feuer
 // This program is licensed under the terms and conditions of the
 // Mozilla Public License, version 2.0.  The full text of the
 // Mozilla Public License is at https://www.mozilla.org/MPL/2.0/
@@ -7,9 +7,7 @@
 //
 
 
-#include "config.hh"
 #include "fstree.hh"
-#include <fstream>
 
 using namespace sigfs;
 

@@ -8,16 +8,6 @@
 
 
 #include "fstree.hh"
-#include <nlohmann/json.hpp>
 
 using namespace sigfs;
-
-FileSystemObject::FileSystemObject(const nlohmann::json& config, ino_t inode):
-    name_(config["name"]),
-    inode_(inode),
-    uid_access(config["uid_access"]),
-    gid_access(config["gid_access"])
-{
-}
-
 

@@ -12,9 +12,13 @@ INCLUDES=-I./json/include $(shell pkg-config fuse3 --cflags)
 #
 # Signal FS main process
 #
-SIGFS_SRC=fstree_filesystem.cc fstree_directory.cc sigfs.cc log.cc queue.cc config.cc 
+SIGFS_SRC=fstree_filesystem.cc fstree_directory.cc fstree_file.o fstree_fsobject.cc sigfs.cc log.cc queue.cc 
 SIGFS_OBJ=${patsubst %.cc, %.o, ${SIGFS_SRC}}
 SIGFS=sigfs
+
+SIGFS_TEST_SRC=fstree_test.cc fstree_filesystem.cc fstree_fsobject.cc fstree_directory.cc fstree_file.cc
+SIGFS_TEST_OBJ=${patsubst %.cc, %.o, ${SIGFS_TEST_SRC}}
+SIGFS_TEST=sigfs_test
 
 DESTDIR ?= /usr/local
 export DESTDIR
@@ -26,15 +30,22 @@ CXXFLAGS ?=-O3 ${INCLUDES} -std=c++20 -Wall -pthread
 #
 # Build the entire project.
 #
-all:  ${SIGFS}
+all:  ${SIGFS} ${SIGFS_TEST}
 
-debug: ${SIGFS} 
+debug: ${SIGFS} ${SIGFS_TEST}
 
 #
 #	Rebuild the static target library.
 #
 ${SIGFS}: ${SIGFS_OBJ}
 	${CXX} -o ${SIGFS} ${SIGFS_OBJ} ${CXXFLAGS} `pkg-config fuse3 --cflags --libs`
+
+
+#
+#	Temporary test
+#
+${SIGFS_TEST}: ${SIGFS_TEST_OBJ}
+	${CXX} -o ${SIGFS_TEST} ${SIGFS_TEST_OBJ} ${CXXFLAGS} `pkg-config fuse3 --cflags --libs`
 
 
 ${SIGFS_OBJ}: ${HDR}
