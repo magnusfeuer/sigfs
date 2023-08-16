@@ -11,9 +11,13 @@
         ],
         "gid_access": [],
         "children": [
+            { "name": "speed" },
             {
-                "name": "speed",
-                "type": "file"
+                "name": "subdir",
+                "children": [
+                    { "name": "f1" },
+                    { "name": "f2" }
+                ]
             }
         ]
     }

@@ -132,6 +132,7 @@ namespace sigfs {
         class INode {
         public:
             INode(FileSystem& owner, const json & config);
+            virtual ~INode(void) {}
             virtual json to_config(void) const;
 
             bool read_access(uid_t uid, gid_t gid) const;
@@ -167,7 +168,7 @@ namespace sigfs {
             json to_config(void) const;
 
         private:
-            class Children: public std::map<const std::string, const INode > {
+            class Children: public std::map<const std::string, std::shared_ptr<const INode> > {
             public:
                 json to_config(void) const;
             };
@@ -191,7 +192,7 @@ namespace sigfs {
             DefaultReadWriteAccess
         };
 
-        Directory root_;
+        std::shared_ptr<Directory> root_;
         ino_t next_inode_;
         bool inherit_access_rights_;
     };

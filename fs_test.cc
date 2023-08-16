@@ -26,6 +26,6 @@ int main(int argc, char *const argv[])
 
     FileSystem fs(json::parse(std::ifstream(argv[1])));
 
-    std::cout << fs.to_config() << std::endl;
+    std::cout << fs.to_config().dump(4) << std::endl;
     exit(0);
 }

@@ -12,16 +12,16 @@
 using namespace sigfs;
 
 FileSystem::File::File(FileSystem& owner, const json& config):
-                INode(owner, config)
+    INode(owner, config)
 {
 }
 
 json FileSystem::File::to_config(void) const
 {
-    std::cout << "YES" << std::endl;
+    std::cout << "Calling File::to_config(" << name() << ")" << std::endl;
     json res(INode::to_config());
 
-    res["type"] = "directory";
+    res["type"] = "file";
     return res;
 }
 

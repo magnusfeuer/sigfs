@@ -21,6 +21,7 @@ FileSystem::INode::INode(FileSystem& owner, const json & config):
 
 json FileSystem::INode::to_config(void) const
 {
+    std::cout << "Calling INode::to_config(" << name() << ")" << std::endl;
     return json( {
             { "name", name_ },
             { "uid_access", uid_access_.to_config() },

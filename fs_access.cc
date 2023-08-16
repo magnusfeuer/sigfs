@@ -43,7 +43,6 @@ bool FileSystem::Access::write_access(void) const
 
 FileSystem::UIDAccessControlMap::UIDAccessControlMap(const json & config)
 {
-    std::cout << config << std::endl;
     for(auto elem: config) {
         insert(std::pair<uid_t, Access>(elem["uid"], elem["access"]));
     }
@@ -66,7 +65,6 @@ json FileSystem::UIDAccessControlMap::to_config(void) const
 
 FileSystem::GIDAccessControlMap::GIDAccessControlMap(const json & config)
 {
-    std::cout << config << std::endl;
     for(auto elem: config) {
         insert(std::pair<gid_t, Access>(elem["gid"], elem["access"]));
     }

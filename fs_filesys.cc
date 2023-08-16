@@ -12,7 +12,7 @@
 using namespace sigfs;
 
 FileSystem::FileSystem(const nlohmann::json& config):
-    root_(*this, config["root"]), // Initialize root recursively with config data
+    root_(std::make_shared<Directory>(*this, config["root"])), // Initialize root recursively with config data
     inherit_access_rights_(config.value("inherit_access_rights", false))
 {
 }
@@ -21,7 +21,7 @@ json FileSystem::to_config(void) const
 {
     json res;
 
-    res["root"] = root_.to_config();
+    res["root"] = root_->to_config();
     res["inherit_access_rights"] = inherit_access_rights_;
     return res;
 }
