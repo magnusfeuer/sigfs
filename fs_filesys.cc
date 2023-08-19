@@ -39,7 +39,10 @@ std::shared_ptr<FileSystem::INode> FileSystem::lookup_inode(const ino_t inode) c
 {
     auto res = inode_entries_.find(inode);
 
-    return (res == inode_entries_.end())?nullptr:res->second;
+    if (res == inode_entries_.end()) 
+        return nullptr;
+
+    return res->second;
 }
 
 

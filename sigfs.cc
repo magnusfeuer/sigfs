@@ -125,7 +125,7 @@ static void do_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
     SIGFS_LOG_DEBUG("do_lookup(parent_inode: %lu, name: %s): Called", parent, name);
 
     if (!parent_dir) {
-        SIGFS_LOG_ERROR("do_lookup(parent_inode: %lu, name: %s): Parent is not a directory", parent, name);
+        SIGFS_LOG_ERROR("do_lookup(parent_inode: %lu, name: %s): Parent is not a directory: %s", parent, name, typeid(parend_dir).name().c_str());
         abort();
     }
 
