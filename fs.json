@@ -1,20 +1,19 @@
 {
-    "inherit_access_rights": true,
     "root": {
-        "type": "directory",
         "name": "/",
         "uid_access": [
             {
                 "uid": 1000,
+                "inherit": true,
                 "access": [ "read" ]
             }
         ],
         "gid_access": [],
-        "children": [
+        "entries": [
             { "name": "speed" },
             {
                 "name": "subdir",
-                "children": [
+                "entries": [
                     { "name": "f1" },
                     { "name": "f2" }
                 ]

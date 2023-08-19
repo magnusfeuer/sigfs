@@ -26,13 +26,15 @@
 #include "subscriber.hh"
 #include <limits.h>
 #include <getopt.h>
-
+#include <fstream>
 #include "fs.hh"
 
 using namespace sigfs;
 
-Queue* g_queue(0);
 
+// Globals for the win
+Queue* g_queue(0);
+std::shared_ptr<FileSystem> fsys;
 
 
 static int check_fuse_call(int index, int fuse_result, const char* fmt, ...)
@@ -117,28 +119,40 @@ static void do_destroy(void* userdata)
 
 static void do_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
 {
-	struct fuse_entry_param e;
+    struct fuse_entry_param e;
+    auto parent_dir = std::dynamic_pointer_cast<FileSystem::Directory>(fsys->lookup_inode(parent));
 
-        SIGFS_LOG_DEBUG("do_lookup(): %s", name);
-	if (parent != 1 || strcmp(name, "signal") != 0) {
-            check_fuse_call(SIGFS_NIL_INDEX,
-                            fuse_reply_err(req, ENOENT),
-                            "do_lookup(): fuse_reply_err(req, ENOENT) returned: ");
-        }
-	else {
-            memset(&e, 0, sizeof(e));
-            e.ino = 2;
-            e.attr_timeout = 1.0;
-            e.entry_timeout = 1.0;
-            e.attr.st_mode = S_IFREG | 0644;
-            e.attr.st_nlink = 1;
+    SIGFS_LOG_DEBUG("do_lookup(parent_inode: %lu, name: %s): Called", parent, name);
 
+    if (!parent_dir) {
+        SIGFS_LOG_ERROR("do_lookup(parent_inode: %lu, name: %s): Parent is not a directory", parent, name);
+        abort();
+    }
 
-            check_fuse_call(SIGFS_NIL_INDEX,
-                            fuse_reply_entry(req, &e),
-                            "do_lookup(): fuse_reply_entry() returned: ");
+    // Lookup entry
+    auto entry = parent_dir->lookup_entry(name);
 
-	}
+    // Not found?
+    if (!entry) {
+        check_fuse_call(SIGFS_NIL_INDEX,
+                        fuse_reply_err(req, ENOENT),
+                        "do_lookup(parent_inode: %lu, name: %s): fuse_reply_err(req, ENOENT) returned: ", parent, name);
+        return;
+    }
+
+    // Found
+    memset(&e, 0, sizeof(e));
+    e.ino = entry->inode();
+    e.attr_timeout = 1.0;
+    e.entry_timeout = 1.0;
+
+    // TODO: Add permissions from access management system!
+    e.attr.st_mode = S_IFREG | 0755;
+    e.attr.st_nlink = 1;
+    check_fuse_call(SIGFS_NIL_INDEX,
+                    fuse_reply_entry(req, &e),
+                    "do_lookup(): fuse_reply_entry() returned: ");
+    return;
 }
 
 static void do_getattr(fuse_req_t req, fuse_ino_t ino,
@@ -549,11 +563,11 @@ static void dummy_log(fuse_log_level level, const char *fmt, va_list ap)
 
 void usage(const char* name)
 {
-    std::cout << "Usage: " << name << " -c <config-file> | --config=<config-file>" << std::endl << std::endl; // 
+    std::cout << "Usage: " << name << " -c <config-file.json> | --config=<config-file.json> <mount-directory>" << std::endl;
+    std::cout << "         -c <config-file.json>  The JSON configuration file to load." << std::endl;
 //    std::cout << "        -f <file> | --file=<file>" << std::endl;
 //    std::cout << "        -c <signal-count> | --count=<signal-count>" << std::endl;
 //    std::cout << "        -s <usec> | --sleep=<usec>" << std::endl;
-    std::cout << "-c <config-file>  The JSON configuration file to load." << std::endl;
 //    std::cout << "-c <signal-count> How many signals to send." << std::endl;
 //    std::cout << "-s <usec>         How many microseconds to sleep between each send." << std::endl;
 //    std::cout << "-d <data>         Data to publish. \"%d\" will be replaced with counter." << std::endl;
@@ -564,14 +578,12 @@ void usage(const char* name)
 
 int main( int argc,  char **argv )
 {
+    std::string config_file("fs.json");
     int ch = 0;
     static struct option long_options[] =  {
         {"config", required_argument, NULL, 'c'},
-        {"help", optional_argument, NULL, 'h'},
-        {"foreground", optional_argument, NULL, 'f'},
         {NULL, 0, NULL, 0}
     };
-    std::string config_file{""};
 
     //
     // loop over all of the options
@@ -585,17 +597,17 @@ int main( int argc,  char **argv )
             break;
 
         default:
-            usage(argv[0]);
-            exit(255);
+            break;
         }
     }
 
     if (config_file.size() == 0) {
-        std::cout << std::endl << "Missing argument: -d <data>" << std::endl << std::endl;
+        std::cout << std::endl << "Missing argument: -c <config.json>" << std::endl << std::endl;
         usage(argv[0]);
         exit(255);
     }
 
+    fsys = std::make_shared<FileSystem>(json::parse(std::ifstream(config_file)));
     struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
     struct fuse_session *se;
     struct fuse_cmdline_opts opts;
@@ -604,9 +616,10 @@ int main( int argc,  char **argv )
 
     g_queue = new Queue(32768*512);
 
-    if (fuse_parse_cmdline(&args, &opts) != 0)
+    if (fuse_parse_cmdline(&args, &opts) != 0) {
+        puts("No mopre");
         return 1;
-
+    }
 
     if (opts.show_help) {
         printf("usage: %s [options] <mountpoint>\n\n", argv[0]);
@@ -632,7 +645,7 @@ int main( int argc,  char **argv )
 /*
           .readlink    = do_readlink,
           .mknod       = do_mknod,
-          .mkdir       = do_mkdir,
++          .mkdir       = do_mkdir,
           .unlink      = do_unlink,
           .rmdir       = do_rmdir,
           .symlink     = do_symlink,
@@ -688,6 +701,7 @@ int main( int argc,  char **argv )
     if (fuse_session_mount(se, opts.mountpoint) != 0)
         goto err_out3;
 
+    opts.foreground = 1;
     fuse_daemonize(opts.foreground);
     // Move us back from root directory.
     /* Block until ctrl+c or fusermount -u */

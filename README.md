@@ -131,6 +131,30 @@ main design features.
    lost. The internal buffer size can be specified in the
    configuration file.
 
+# STARTING SIGFS
+
+    $ mkdir sigfs-dir
+    $ ./sigfs -f ./sigfs-dir
+
+The command line arguments to sigfs are forwarded directly to the
+underlying FUSE library (libfuse). 
+
+**TO BE IMPLEMENTED:** The only added parameter is `-c
+<config-dile>`, specifying the sigfs JSON configuration file to use.
+
+Running `./sigfs` will mount a file system on top of the specified
+directory (`./sigfs-dir`) and create a number of signal files in that
+file system. The signal files to create are read from the
+configuration file.
+
+Please use `sigfs --help` for a list of available options.
+
+**NOTE**: `sigfs` currently only creates a single file,
+`"./sigfs-dir/x"`. Future versions will support full-blown directory
+trees with multiple signal files.
+
+
+
 # BUILDING SIGFS
 
     $ make
@@ -138,28 +162,6 @@ main design features.
     
 The package `libfuse3-dev` needs to be installed to provide the FUSE
 library and header files.
-
-
-
-# STARTING SIGFS
-
-    $ mkdir sigfs
-    $ /sigfs -c sigfs.cfg -f ./sigfs 
-
-The command line arguments to sigfs are forwarded directly to the
-underlying FUSE library (libfuse).  The only added parameter is `-c
-<config-dile>`, specifying the sigfs JSON configuration file to use.
-
-Running `sigfs` will mount a file system on top of the specified
-directory (`./sigfs`) and create a number of signal files in that
-file system. The signal files to create are read from the
-configuration file.
-
-Please use `sigfs --help` for a list of available options.
-
-**NOTE**: `sigfs` currently only creates a single file,
-`"./sigfs/x"`. Future versions will support full-blown directory
-trees with multiple signal files.
 
 
 

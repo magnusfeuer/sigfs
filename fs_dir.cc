@@ -9,26 +9,28 @@
 
 #include "fs.hh"
 #include <iostream>
+#include "log.h"
 
 using namespace sigfs;
 
 FileSystem::Directory::Directory(FileSystem& owner, const json& config):
     INode(owner, config)
 {
+    if (!config.contains("entries")) {
+        SIGFS_LOG_ERROR("Directory::Directory(): No \"entries\" element in JSON config.");
+        SIGFS_LOG_ERROR(config.dump(4).c_str());
+        abort();
+    }
 
-    for(auto child: config["children"]) {
-        const std::string type(child.value("type", "file"));
-        const std::string name(child["name"]);
+    for(auto entry: config["entries"]) {
+        const std::string name(entry["name"]);
 
-        // TODO: Replace with FileSystem factory.
-        if (type == "directory" || child.contains("children")) {
-            children_.insert(std::pair (name, std::make_shared<Directory>(owner, child)));
+        // Anything with an "entries" element is a directory.
+        if (entry.contains("entries")) {
+            entries_.insert(std::pair (name, std::make_shared<Directory>(owner, entry)));
         }
-        else if (type == "file") {
-            children_.insert(std::pair (name, std::make_shared<File>(owner, child)));
-        } else {
-            std::cout << "Unknown inode type: " << type << std::endl;
-            abort();
+        else {
+            entries_.insert(std::pair (name, std::make_shared<File>(owner, entry)));
         }
     }
 }
@@ -37,16 +39,13 @@ FileSystem::Directory::Directory(FileSystem& owner, const json& config):
 
 json FileSystem::Directory::to_config(void) const
 {
-    std::cout << "Calling Directory::to_config(" << name() << ")" << std::endl;
-
     json res(INode::to_config());
 
-    res["type"] = "directory";
-    res["children"] = children_.to_config();
+    res["entries"] = entries_.to_config();
     return res;
 }
 
-json FileSystem::Directory::Children::to_config(void) const
+json FileSystem::Directory::Entries::to_config(void) const
 {
     json lst = json::array();
 
@@ -56,4 +55,12 @@ json FileSystem::Directory::Children::to_config(void) const
     }
 
     return lst;
+}
+
+std::shared_ptr<const FileSystem::INode>
+FileSystem::Directory::lookup_entry(const std::string& name) const
+{
+    auto res = entries_.find(name);
+
+    return (res == entries_.end())?nullptr:res->second;
 }

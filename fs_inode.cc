@@ -13,7 +13,7 @@ using namespace sigfs;
 
 FileSystem::INode::INode(FileSystem& owner, const json & config):
     name_(config["name"]),
-    inode_(owner.get_next_inode()),
+    inode_(owner.register_inode(std::make_shared<INode>(*this))),
     uid_access_(UIDAccessControlMap(config.value("uid_access", json::array()))),
     gid_access_(GIDAccessControlMap(config.value("gid_access", json::array())))
 {
@@ -21,7 +21,6 @@ FileSystem::INode::INode(FileSystem& owner, const json & config):
 
 json FileSystem::INode::to_config(void) const
 {
-    std::cout << "Calling INode::to_config(" << name() << ")" << std::endl;
     return json( {
             { "name", name_ },
             { "uid_access", uid_access_.to_config() },
@@ -32,4 +31,9 @@ json FileSystem::INode::to_config(void) const
 const std::string FileSystem::INode::name(void) const
 {
     return name_;
+}
+
+const ino_t FileSystem::INode::inode(void) const
+{
+    return inode_;
 }

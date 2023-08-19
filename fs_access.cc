@@ -10,9 +10,10 @@
 #include "fs.hh"
 
 using namespace sigfs;
-FileSystem::Access::Access(const json & config):
+FileSystem::Access::Access(const json & config, bool inherited):
     read_access_(config.contains("read")),
-    write_access_(config.contains("write"))
+    write_access_(config.contains("write")),
+    inherited_(inherited)
 {
 }
 
@@ -40,6 +41,10 @@ bool FileSystem::Access::write_access(void) const
     return write_access_;
 }
 
+bool FileSystem::Access::inherited(void) const
+{
+    return inherited_;
+}
 
 FileSystem::UIDAccessControlMap::UIDAccessControlMap(const json & config)
 {

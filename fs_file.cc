@@ -18,10 +18,7 @@ FileSystem::File::File(FileSystem& owner, const json& config):
 
 json FileSystem::File::to_config(void) const
 {
-    std::cout << "Calling File::to_config(" << name() << ")" << std::endl;
     json res(INode::to_config());
-
-    res["type"] = "file";
     return res;
 }
 

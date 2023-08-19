@@ -12,11 +12,11 @@ INCLUDES=-I./json/include $(shell pkg-config fuse3 --cflags)
 #
 # Signal FS main process
 #
-SIGFS_SRC=fs_filesys.cc fs_dir.cc fs_file.o fs_inode.cc sigfs.cc log.cc queue.cc fs_access.cc
+SIGFS_SRC=fs_filesys.cc fs_dir.cc fs_file.cc fs_inode.cc sigfs.cc log.cc queue.cc fs_access.cc
 SIGFS_OBJ=${patsubst %.cc, %.o, ${SIGFS_SRC}}
 SIGFS=sigfs
 
-SIGFS_TEST_SRC=fs_test.cc fs_filesys.cc fs_inode.cc fs_dir.cc fs_file.cc fs_access.cc
+SIGFS_TEST_SRC=fs_test.cc fs_filesys.cc fs_inode.cc fs_dir.cc fs_file.cc fs_access.cc log.cc
 SIGFS_TEST_OBJ=${patsubst %.cc, %.o, ${SIGFS_TEST_SRC}}
 SIGFS_TEST=sigfs_test
 

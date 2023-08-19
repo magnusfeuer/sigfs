@@ -41,15 +41,17 @@ namespace sigfs {
         // Default value for "write" is false
         class Access {
         public:
-            Access(const json & config);
+            Access(const json & config, bool inherited = false);
             json to_config(void) const;
 
             bool read_access(void) const;
             bool write_access(void) const;
+            bool inherited(void) const;
 
         private:
             bool read_access_ = false; // Default init for extra security
             bool write_access_ = false;
+            bool inherited_ = false;
         };
 
 
@@ -137,7 +139,7 @@ namespace sigfs {
 
             bool read_access(uid_t uid, gid_t gid) const;
             bool write_access(uid_t uid, gid_t gid) const;
-
+            const ino_t inode(void) const; 
             const std::string name(void) const;
 
         private:
@@ -167,19 +169,25 @@ namespace sigfs {
             Directory(FileSystem& owner, const json &config);
             json to_config(void) const;
 
+            std::shared_ptr<const INode> lookup_entry(const std::string& name) const;
+
         private:
-            class Children: public std::map<const std::string, std::shared_ptr<const INode> > {
+            class Entries: public std::map<const std::string, std::shared_ptr<const INode> > {
             public:
                 json to_config(void) const;
             };
-            Children children_;
+            Entries entries_;
         };
 
     public:
         FileSystem(const json &config);
 
-        const ino_t get_next_inode(void) { return next_inode_++; }
+        const ino_t register_inode(const std::shared_ptr<INode> inode);
+        std::shared_ptr<INode> lookup_inode(const ino_t inode) const;
 
+        const INode& null_inode(void) const;
+
+        const Directory& root(void) const;
         json to_config(void) const;
 
     private:
@@ -192,8 +200,9 @@ namespace sigfs {
             DefaultReadWriteAccess
         };
 
+        std::map<const ino_t, std::shared_ptr<INode>> inode_entries_;
+        mutable ino_t next_inode_nr_ = 1;
+        bool inherit_access_rights_ = false;
         std::shared_ptr<Directory> root_;
-        ino_t next_inode_;
-        bool inherit_access_rights_;
     };
 }
