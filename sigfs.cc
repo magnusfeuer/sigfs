@@ -174,67 +174,52 @@ static void do_getattr(fuse_req_t req, fuse_ino_t entry_ino, struct fuse_file_in
     st.st_atime = time(0);
     st.st_mtime = time(0);
 
-    // Do we have a directory
-    if (typeid(entry) == typeid(std::shared_ptr<const FileSystem::Directory>)) {
+/*
+    switch (entry_ino) {
+    case 1: // Rot inode "/"
         st.st_mode = S_IFDIR | 0755;
         st.st_nlink = 2;
+        SIGFS_LOG_DEBUG( "----------------do_getattr(inode: %lu): Setting mode to 0%ho" , entry_ino, st.st_mode);
+        break;
+
+    case 2: // Signal inode "/signal"
+        st.st_mode = S_IFREG | 0644;
+        st.st_nlink = 1;
+        SIGFS_LOG_DEBUG( "----------------do_getattr(inode: %lu): Setting mode to 0%ho" , entry_ino, st.st_mode);
+        break;
+
+    default:
+        check_fuse_call(SIGFS_NIL_INDEX,
+                        fuse_reply_err(req, ENOENT),
+                        "do_getattr(): fuse_reply_err(ENOENT) returned: ");
+        return;
+    }
+
+
+    check_fuse_call(SIGFS_NIL_INDEX,
+                    fuse_reply_attr(req, &st, 1.0), // No idea about a good timeout value
+                    "do_getattr(): fuse_reply_attr(ENOENT) returned: ");
+
+    SIGFS_LOG_DEBUG("do_getattr(): Inode [%lu] not supported. Return ENOENT", entry_ino);
+    return;
+*/
+
+    // Do we have a directory
+    if (typeid(*entry) == typeid(const FileSystem::Directory)) {
+        st.st_mode = S_IFDIR | 0755;
+        st.st_nlink = 2;
+        SIGFS_LOG_DEBUG( "----------------do_getattr(inode: %lu): Setting mode to 0%ho" , entry_ino, st.st_mode);
     }
     // Else we have a file
     else {
         st.st_mode = S_IFREG | 0644;
         st.st_nlink = 1;
+        SIGFS_LOG_DEBUG( "----------------do_getattr(inode: %lu): Setting mode to 0%ho" , entry_ino, st.st_mode);
     }
-#define UINT32_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c"
-#define UINT32_TO_BINARY(val)                     \
-    ((val) & 0x80000000 ? '1' : '0'),             \
-        ((val) & 0x40000000 ? '1' : '0'),         \
-        ((val) & 0x20000000 ? '1' : '0'),         \
-        ((val) & 0x10000000 ? '1' : '0'),         \
-        ((val) & 0x08000000 ? '1' : '0'),         \
-        ((val) & 0x04000000 ? '1' : '0'),         \
-        ((val) & 0x02000000 ? '1' : '0'),         \
-        ((val) & 0x01000000 ? '1' : '0'),         \
-        ((val) & 0x00800000 ? '1' : '0'),         \
-        ((val) & 0x00400000 ? '1' : '0'),         \
-        ((val) & 0x00200000 ? '1' : '0'),         \
-        ((val) & 0x00100000 ? '1' : '0'),         \
-        ((val) & 0x00080000 ? '1' : '0'),         \
-        ((val) & 0x00040000 ? '1' : '0'),         \
-        ((val) & 0x00020000 ? '1' : '0'),         \
-        ((val) & 0x00010000 ? '1' : '0'),         \
-        ((val) & 0x00008000 ? '1' : '0'),         \
-        ((val) & 0x00004000 ? '1' : '0'),         \
-        ((val) & 0x00002000 ? '1' : '0'),         \
-        ((val) & 0x00001000 ? '1' : '0'),         \
-        ((val) & 0x00000800 ? '1' : '0'),         \
-        ((val) & 0x00000400 ? '1' : '0'),         \
-        ((val) & 0x00000200 ? '1' : '0'),         \
-        ((val) & 0x00000100 ? '1' : '0'),         \
-        ((val) & 0x00000080 ? '1' : '0'),         \
-        ((val) & 0x00000040 ? '1' : '0'),         \
-        ((val) & 0x00000020 ? '1' : '0'),         \
-        ((val) & 0x00000010 ? '1' : '0'),         \
-        ((val) & 0x00000008 ? '1' : '0'),         \
-        ((val) & 0x00000004 ? '1' : '0'),         \
-        ((val) & 0x00000002 ? '1' : '0'),         \
-        ((val) & 0x00000001 ? '1' : '0')
 
-
-
-    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): Attributes: 0%o", st.st_mode);
-    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): Attributes: " UINT32_TO_BINARY_PATTERN, UINT32_TO_BINARY(st.st_mode));
-    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): S_IFDIR   : " UINT32_TO_BINARY_PATTERN, UINT32_TO_BINARY(S_IFDIR));
-    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): 0755      : " UINT32_TO_BINARY_PATTERN, UINT32_TO_BINARY(0755));
-
-
-//        error:
-//        check_fuse_call(SIGFS_NIL_INDEX,
-//                        fuse_reply_err(req, ENOENT),
-//                        "do_getattr(): fuse_reply_err(ENOENT) returned: ");
-
-
+    int res = fuse_reply_attr(req, &st, 1.0);
     check_fuse_call(SIGFS_NIL_INDEX,
-                    fuse_reply_attr(req, &st, 1.0), // No idea about a good timeout value
+                    res,
                     "do_getattr( dir_inode: %lu, entry_name: %s): Failed", entry_ino, entry->name().c_str());
 
 
@@ -244,6 +229,7 @@ static void do_getattr(fuse_req_t req, fuse_ino_t entry_ino, struct fuse_file_in
     //     print_file_info(prefix, st.st_mode);
     // }
     return;
+
 }
 
 //
