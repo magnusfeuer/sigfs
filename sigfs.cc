@@ -60,41 +60,41 @@ static int check_fuse_call(int index, int fuse_result, const char* fmt, ...)
 }
 
 
-static void print_file_info(const char* prefix, struct fuse_file_info* fi)
+static void print_file_info(const char* prefix, uint32_t flags)
 {
     if (_sigfs_log_level != SIGFS_LOG_LEVEL_DEBUG)
         return;
 
     char res[1025];
-    sprintf(res, "%s  flags[%.8X]:", prefix, fi->flags);
-    if (fi->flags & O_CREAT) strcat(res, " O_CREAT");
-    if (fi->flags & O_EXCL) strcat(res, " O_EXCL");
-    if (fi->flags & O_TRUNC) strcat(res, " O_TRUNC");
-    if (fi->flags & O_NONBLOCK) strcat(res, " O_NONBLOCK");
-    if (fi->flags & O_DSYNC) strcat(res, " O_DSYNC");
-    if (fi->flags & FASYNC) strcat(res, " FASYNC(!!)");
+    sprintf(res, "%s  flags[%.8X]:", prefix, flags);
+    if (flags & O_CREAT) strcat(res, " O_CREAT");
+    if (flags & O_EXCL) strcat(res, " O_EXCL");
+    if (flags & O_TRUNC) strcat(res, " O_TRUNC");
+    if (flags & O_NONBLOCK) strcat(res, " O_NONBLOCK");
+    if (flags & O_DSYNC) strcat(res, " O_DSYNC");
+    if (flags & FASYNC) strcat(res, " FASYNC(!!)");
 #ifdef O_LARGEFILE
-    if (fi->flags & O_LARGEFILE) strcat(res, " O_LARGEFILE");
+    if (flags & O_LARGEFILE) strcat(res, " O_LARGEFILE");
 #endif
-    if (fi->flags & O_DIRECTORY) strcat(res, " O_DIRECTORY");
+    if (flags & O_DIRECTORY) strcat(res, " O_DIRECTORY");
 #ifdef O_DIRECT
-    if (fi->flags & O_DIRECT) strcat(res, " O_DIRECT");
+    if (flags & O_DIRECT) strcat(res, " O_DIRECT");
 #endif
-    if (fi->flags & O_NOFOLLOW) strcat(res, " O_NOFOLLOW");
+    if (flags & O_NOFOLLOW) strcat(res, " O_NOFOLLOW");
 #ifdef O_NOATIME
-    if (fi->flags & O_NOATIME) strcat(res, " O_NOATIME");
+    if (flags & O_NOATIME) strcat(res, " O_NOATIME");
 #endif
-    if (fi->flags & O_CLOEXEC) strcat(res, " O_CLOEXEC");
-    if (fi->flags & O_NONBLOCK) strcat(res, " O_NONBLOCK");
+    if (flags & O_CLOEXEC) strcat(res, " O_CLOEXEC");
+    if (flags & O_NONBLOCK) strcat(res, " O_NONBLOCK");
 #ifdef O_PATH
-    if (fi->flags & O_PATH) strcat(res, " O_PATH");
+    if (flags & O_PATH) strcat(res, " O_PATH");
 #endif
-    if (fi->flags & O_NOCTTY) strcat(res, " O_NOCTTY");
-    if (fi->flags & O_RDONLY) strcat(res, " O_RDONLY");
-    if (fi->flags & O_WRONLY) strcat(res, " O_WRONLY");
-    if (fi->flags & O_RDWR) strcat(res, " O_RDWR");
-    if (fi->flags & O_EXCL) strcat(res, " O_EXCL");
-    if (fi->flags & O_APPEND) strcat(res, " O_APPEND");
+    if (flags & O_NOCTTY) strcat(res, " O_NOCTTY");
+    if (flags & O_RDONLY) strcat(res, " O_RDONLY");
+    if (flags & O_WRONLY) strcat(res, " O_WRONLY");
+    if (flags & O_RDWR) strcat(res, " O_RDWR");
+    if (flags & O_EXCL) strcat(res, " O_EXCL");
+    if (flags & O_APPEND) strcat(res, " O_APPEND");
     SIGFS_LOG_DEBUG(res);
 }
 
@@ -120,12 +120,14 @@ static void do_destroy(void* userdata)
 static void do_lookup(fuse_req_t req, fuse_ino_t dir_ino, const char *name)
 {
     struct fuse_entry_param e;
-    auto dir = std::dynamic_pointer_cast<FileSystem::Directory>(g_fsys->lookup_inode(dir_ino));
+    auto dir = std::dynamic_pointer_cast<const FileSystem::Directory>(g_fsys->lookup_inode(dir_ino));
 
-    SIGFS_LOG_DEBUG("do_lookup( parent_inode: %lu, name: %s): Called", dir, name);
+    SIGFS_LOG_DEBUG("do_lookup( dir_inode: %lu, entry_name: %s): Called", dir_ino, name);
 
     if (dir == nullptr) {
-        SIGFS_LOG_ERROR("do_lookup(inode: %lu, name: %s): Parent not directory. JSON:\n%s\n", dir->to_config().dump(4).c_str());
+        auto entry = g_fsys->lookup_inode(dir_ino);
+        SIGFS_LOG_ERROR("do_lookup(inode: %lu, name: %s, entry_name: %s): Parent not directory. JSON:\n%s\n",
+                        dir_ino, entry->name(), name, entry->to_config().dump(4).c_str());
         abort();
     }
 
@@ -155,44 +157,92 @@ static void do_lookup(fuse_req_t req, fuse_ino_t dir_ino, const char *name)
     return;
 }
 
-static void do_getattr(fuse_req_t req, fuse_ino_t ino,
-                       struct fuse_file_info *fi)
+static void do_getattr(fuse_req_t req, fuse_ino_t entry_ino, struct fuse_file_info *fi)
 {
-    SIGFS_LOG_DEBUG( "do_getattr(%lu): Called" , ino);
-    struct stat st{}; // Init to default values (== 0)
+    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): Called" , entry_ino);
+    struct stat st {}; // Init to default values (== 0)
+
+    auto entry = g_fsys->lookup_inode(entry_ino);
+
+    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): Resolved to: %s" , entry_ino, entry->name().c_str());
 
     (void) fi;
 
-    st.st_ino = ino;
+    st.st_ino = entry_ino;
     st.st_uid = getuid();
     st.st_gid = getgid();
     st.st_atime = time(0);
     st.st_mtime = time(0);
 
-    switch (ino) {
-    case 1: // ROot inode "/"
+    // Do we have a directory
+    if (typeid(entry) == typeid(std::shared_ptr<const FileSystem::Directory>)) {
         st.st_mode = S_IFDIR | 0755;
         st.st_nlink = 2;
-        break;
-
-    case 2: // Signal inode "/signal"
+    }
+    // Else we have a file
+    else {
         st.st_mode = S_IFREG | 0644;
         st.st_nlink = 1;
-        break;
-
-    default:
-        check_fuse_call(SIGFS_NIL_INDEX,
-                        fuse_reply_err(req, ENOENT),
-                        "do_getattr(): fuse_reply_err(ENOENT) returned: ");
-        return;
     }
+#define UINT32_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c"
+#define UINT32_TO_BINARY(val)                     \
+    ((val) & 0x80000000 ? '1' : '0'),             \
+        ((val) & 0x40000000 ? '1' : '0'),         \
+        ((val) & 0x20000000 ? '1' : '0'),         \
+        ((val) & 0x10000000 ? '1' : '0'),         \
+        ((val) & 0x08000000 ? '1' : '0'),         \
+        ((val) & 0x04000000 ? '1' : '0'),         \
+        ((val) & 0x02000000 ? '1' : '0'),         \
+        ((val) & 0x01000000 ? '1' : '0'),         \
+        ((val) & 0x00800000 ? '1' : '0'),         \
+        ((val) & 0x00400000 ? '1' : '0'),         \
+        ((val) & 0x00200000 ? '1' : '0'),         \
+        ((val) & 0x00100000 ? '1' : '0'),         \
+        ((val) & 0x00080000 ? '1' : '0'),         \
+        ((val) & 0x00040000 ? '1' : '0'),         \
+        ((val) & 0x00020000 ? '1' : '0'),         \
+        ((val) & 0x00010000 ? '1' : '0'),         \
+        ((val) & 0x00008000 ? '1' : '0'),         \
+        ((val) & 0x00004000 ? '1' : '0'),         \
+        ((val) & 0x00002000 ? '1' : '0'),         \
+        ((val) & 0x00001000 ? '1' : '0'),         \
+        ((val) & 0x00000800 ? '1' : '0'),         \
+        ((val) & 0x00000400 ? '1' : '0'),         \
+        ((val) & 0x00000200 ? '1' : '0'),         \
+        ((val) & 0x00000100 ? '1' : '0'),         \
+        ((val) & 0x00000080 ? '1' : '0'),         \
+        ((val) & 0x00000040 ? '1' : '0'),         \
+        ((val) & 0x00000020 ? '1' : '0'),         \
+        ((val) & 0x00000010 ? '1' : '0'),         \
+        ((val) & 0x00000008 ? '1' : '0'),         \
+        ((val) & 0x00000004 ? '1' : '0'),         \
+        ((val) & 0x00000002 ? '1' : '0'),         \
+        ((val) & 0x00000001 ? '1' : '0')
+
+
+
+    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): Attributes: 0%o", st.st_mode);
+    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): Attributes: " UINT32_TO_BINARY_PATTERN, UINT32_TO_BINARY(st.st_mode));
+    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): S_IFDIR   : " UINT32_TO_BINARY_PATTERN, UINT32_TO_BINARY(S_IFDIR));
+    SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): 0755      : " UINT32_TO_BINARY_PATTERN, UINT32_TO_BINARY(0755));
+
+
+//        error:
+//        check_fuse_call(SIGFS_NIL_INDEX,
+//                        fuse_reply_err(req, ENOENT),
+//                        "do_getattr(): fuse_reply_err(ENOENT) returned: ");
 
 
     check_fuse_call(SIGFS_NIL_INDEX,
                     fuse_reply_attr(req, &st, 1.0), // No idea about a good timeout value
-                    "do_getattr(): fuse_reply_attr(ENOENT) returned: ");
+                    "do_getattr( dir_inode: %lu, entry_name: %s): Failed", entry_ino, entry->name().c_str());
 
-    SIGFS_LOG_DEBUG("do_getattr(): Inode [%lu] not supported. Return ENOENT", ino);
+
+    // if (_sigfs_log_level == SIGFS_LOG_LEVEL_DEBUG) {
+    //     char prefix[1025];
+    //     sprintf(prefix, "do_getattr( dir_inode: %lu, entry_name: %s): File attributes: ", entry_ino, entry->name().c_str());
+    //     print_file_info(prefix, st.st_mode);
+    // }
     return;
 }
 
@@ -240,7 +290,7 @@ static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
                       off_t off, struct fuse_file_info *fi)
 {
     SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu): Called", dir_inode);
-    auto dir = std::dynamic_pointer_cast<FileSystem::Directory>(g_fsys->lookup_inode(dir_inode));
+    auto dir = std::dynamic_pointer_cast<const FileSystem::Directory>(g_fsys->lookup_inode(dir_inode));
 
     // g_fsys->lookup_inode() will termiante program if inode not found.
     // If we have a null pointer here, it is because dymaic cast is failing due to
@@ -259,8 +309,8 @@ static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
     dirbuf_add(req, &b, ".", dir_inode);
     dirbuf_add(req, &b, "..", dir->parent_inode());
 
-    dir->for_each_entry([&req, &b, &dir](const std::shared_ptr<const FileSystem::INode> entry) {
-        SIGFS_LOG_DEBUG("do_lookup(%s): Adding entry %s", dir->name().c_str(), entry->name().c_str());
+    dir->for_each_entry([&dir_inode, &req, &b, &dir](const std::shared_ptr<const FileSystem::INode> entry) {
+        SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu, dir_name: %s): Adding entry %s", dir_inode, dir->name().c_str(), entry->name().c_str());
         dirbuf_add(req, &b, entry->name().c_str(), entry->inode());
     });
     check_fuse_call(SIGFS_NIL_INDEX,
@@ -278,7 +328,7 @@ static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
 static void do_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
     SIGFS_LOG_DEBUG("do_open(%lu): Called", ino );
-    print_file_info("do_open():", fi);
+    print_file_info("do_open():", fi->flags);
     if (ino != 2) {
         fuse_reply_err(req, EISDIR);
         return;

@@ -31,7 +31,7 @@ json FileSystem::to_config(void) const
 
 void FileSystem::register_inode(std::shared_ptr<INode> inode)
 {
-    std::cout << "An entry with inode with inode  " << inode->inode() << " and name " << inode->name() << " was registered." << std::endl;
+    SIGFS_LOG_DEBUG("FileSystem::register_inode(inode: %lu, name: %s): Called.", inode->inode(), inode->name().c_str());
     inode_entries_.insert(std::pair(inode->inode(), inode));
     return;
 }
@@ -41,7 +41,7 @@ const ino_t FileSystem::get_next_inode()
     return next_inode_nr_++;
 }
 
-std::shared_ptr<FileSystem::INode> FileSystem::lookup_inode(const ino_t lookup_inode) const
+std::shared_ptr<const FileSystem::INode> FileSystem::lookup_inode(const ino_t lookup_inode) const
 {
     auto res = inode_entries_.find(lookup_inode);
 
@@ -49,10 +49,6 @@ std::shared_ptr<FileSystem::INode> FileSystem::lookup_inode(const ino_t lookup_i
         SIGFS_LOG_FATAL("FileSystem::lookup_inode(inode: %lu): No inode found in global filesys table.", lookup_inode);
         abort();
     }
-
-    std::cout << "An entry with inode with inode  " <<lookup_inode << " and name " << res->second->name() << " | " << res->second->inode() << " was found " << std::endl;
-    std::cout << "Dumping found entry" << std::endl;
-    std::cout << res->second->to_config().dump(4) << std::endl;
 
     return res->second;
 }

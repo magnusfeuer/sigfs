@@ -184,7 +184,7 @@ namespace sigfs {
 
         const ino_t get_next_inode(void);
         void register_inode(const std::shared_ptr<INode> inode);
-        std::shared_ptr<INode> lookup_inode(const ino_t inode) const;
+        std::shared_ptr<const INode> lookup_inode(const ino_t inode) const;
 
         const INode& null_inode(void) const;
 

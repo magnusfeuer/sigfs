@@ -72,11 +72,11 @@ FileSystem::Directory::lookup_entry(const std::string& lookup_name) const
     auto res = entries_.find(lookup_name);
 
     if (res == entries_.end()) {
-        std::cout << "In inode " << inode() << " | " << name() << " no entry named " << lookup_name << " was found " << std::endl;
+        SIGFS_LOG_DEBUG("Directory::lookup_entry(directory_name: %s, lookup_name: %s): Not found.", name().c_str(), lookup_name.c_str());
         return nullptr;
     }
 
-    std::cout << "In inode " << inode() << " | " << name() << " An entry with inode with name  " <<lookup_name << " and inode " << res->second->inode() << " was found " << std::endl;
+    SIGFS_LOG_DEBUG("Directory::lookup_entry(directory_name: %s, lookup_name: %s): Found. inode: %lu", name().c_str(), lookup_name.c_str(), res->second->inode());
     return  res->second;
 }
 
