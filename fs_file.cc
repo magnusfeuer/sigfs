@@ -11,15 +11,9 @@
 
 using namespace sigfs;
 
-FileSystem::File::File(FileSystem& owner, const json& config):
-    INode(owner, config)
+FileSystem::File::File(FileSystem& owner, const ino_t parent_inode, const json& config):
+    INode(owner, parent_inode, config)
 {
-}
-
-json FileSystem::File::to_config(void) const
-{
-    json res(INode::to_config());
-    return res;
 }
 
 

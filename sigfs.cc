@@ -34,7 +34,7 @@ using namespace sigfs;
 
 // Globals for the win
 Queue* g_queue(0);
-std::shared_ptr<FileSystem> fsys;
+std::shared_ptr<FileSystem> g_fsys;
 
 
 static int check_fuse_call(int index, int fuse_result, const char* fmt, ...)
@@ -117,26 +117,26 @@ static void do_destroy(void* userdata)
     SIGFS_LOG_DEBUG("do_destroy(): Called");
 }
 
-static void do_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
+static void do_lookup(fuse_req_t req, fuse_ino_t dir_ino, const char *name)
 {
     struct fuse_entry_param e;
-    auto parent_dir = std::dynamic_pointer_cast<FileSystem::Directory>(fsys->lookup_inode(parent));
+    auto dir = std::dynamic_pointer_cast<FileSystem::Directory>(g_fsys->lookup_inode(dir_ino));
 
-    SIGFS_LOG_DEBUG("do_lookup(parent_inode: %lu, name: %s): Called", parent, name);
+    SIGFS_LOG_DEBUG("do_lookup( parent_inode: %lu, name: %s): Called", dir, name);
 
-    if (!parent_dir) {
-        SIGFS_LOG_ERROR("do_lookup(parent_inode: %lu, name: %s): Parent is not a directory: %s", parent, name, typeid(parend_dir).name().c_str());
+    if (dir == nullptr) {
+        SIGFS_LOG_ERROR("do_lookup(inode: %lu, name: %s): Parent not directory. JSON:\n%s\n", dir->to_config().dump(4).c_str());
         abort();
     }
 
     // Lookup entry
-    auto entry = parent_dir->lookup_entry(name);
+    auto entry = dir->lookup_entry(name);
 
     // Not found?
     if (!entry) {
         check_fuse_call(SIGFS_NIL_INDEX,
                         fuse_reply_err(req, ENOENT),
-                        "do_lookup(parent_inode: %lu, name: %s): fuse_reply_err(req, ENOENT) returned: ", parent, name);
+                        "do_lookup(inode: %lu, name: %s): fuse_reply_err(req, ENOENT) returned: ", dir_ino, name);
         return;
     }
 
@@ -236,21 +236,33 @@ static void dirbuf_add(fuse_req_t req, struct dirbuf *b, const char *name, fuse_
 	fuse_add_direntry(req, b->p + oldsize, b->size - oldsize, name, &stbuf, b->size);
 }
 
-static void do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
+static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
                       off_t off, struct fuse_file_info *fi)
 {
-//    SIGFS_LOG_DEBUG("do_readdir(): Called.");
-    (void) fi;
-    if (ino != 1) {
+    SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu): Called", dir_inode);
+    auto dir = std::dynamic_pointer_cast<FileSystem::Directory>(g_fsys->lookup_inode(dir_inode));
+
+    // g_fsys->lookup_inode() will termiante program if inode not found.
+    // If we have a null pointer here, it is because dymaic cast is failing due to
+    // the fact that we are trying to read the directory entries of a file
+    //
+    if (dir == nullptr) {
+        SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu): Inode is not a directory.\n", dir_inode);
         fuse_reply_err(req, ENOTDIR);
         return;
     }
+
+    (void) fi;
     struct dirbuf b;
 
     memset(&b, 0, sizeof(b));
-    dirbuf_add(req, &b, ".", 1);
-    dirbuf_add(req, &b, "..", 1);
-    dirbuf_add(req, &b, "signal", 2);
+    dirbuf_add(req, &b, ".", dir_inode);
+    dirbuf_add(req, &b, "..", dir->parent_inode());
+
+    dir->for_each_entry([&req, &b, &dir](const std::shared_ptr<const FileSystem::INode> entry) {
+        SIGFS_LOG_DEBUG("do_lookup(%s): Adding entry %s", dir->name().c_str(), entry->name().c_str());
+        dirbuf_add(req, &b, entry->name().c_str(), entry->inode());
+    });
     check_fuse_call(SIGFS_NIL_INDEX,
                     reply_buf_limited(req, b.p, b.size, off, size),
                     "do_readdir(): reply_buf_limited() returned: ");
@@ -607,7 +619,7 @@ int main( int argc,  char **argv )
         exit(255);
     }
 
-    fsys = std::make_shared<FileSystem>(json::parse(std::ifstream(config_file)));
+    g_fsys = std::make_shared<FileSystem>(json::parse(std::ifstream(config_file)));
     struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
     struct fuse_session *se;
     struct fuse_cmdline_opts opts;

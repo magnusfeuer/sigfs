@@ -13,8 +13,8 @@
 
 using namespace sigfs;
 
-FileSystem::Directory::Directory(FileSystem& owner, const json& config):
-    INode(owner, config)
+FileSystem::Directory::Directory(FileSystem& owner, const ino_t parent_inode, const json& config):
+    INode(owner, parent_inode, config)
 {
     if (!config.contains("entries")) {
         SIGFS_LOG_ERROR("Directory::Directory(): No \"entries\" element in JSON config.");
@@ -32,10 +32,14 @@ FileSystem::Directory::Directory(FileSystem& owner, const json& config):
 
             // SIGFS_LOG_ERROR("dir_entry(): %s", dir_entry->name().c_str());
 
-            entries_.insert(std::pair (name, std::make_shared<Directory>(owner, entry)));
+            auto new_dir = std::make_shared<Directory>(owner, inode(), entry);
+            entries_.insert(std::pair (name, new_dir));
+            owner.register_inode(new_dir);
         }
         else {
-            entries_.insert(std::pair (name, std::make_shared<File>(owner, entry)));
+            auto new_file = std::make_shared<File>(owner, inode(), entry);
+            entries_.insert(std::pair (name, new_file));
+            owner.register_inode(new_file);
         }
     }
 }
@@ -63,9 +67,28 @@ json FileSystem::Directory::Entries::to_config(void) const
 }
 
 std::shared_ptr<const FileSystem::INode>
-FileSystem::Directory::lookup_entry(const std::string& name) const
+FileSystem::Directory::lookup_entry(const std::string& lookup_name) const
 {
-    auto res = entries_.find(name);
+    auto res = entries_.find(lookup_name);
 
-    return (res == entries_.end())?nullptr:res->second;
+    if (res == entries_.end()) {
+        std::cout << "In inode " << inode() << " | " << name() << " no entry named " << lookup_name << " was found " << std::endl;
+        return nullptr;
+    }
+
+    std::cout << "In inode " << inode() << " | " << name() << " An entry with inode with name  " <<lookup_name << " and inode " << res->second->inode() << " was found " << std::endl;
+    return  res->second;
+}
+
+
+void FileSystem::Directory::for_each_entry(std::function<void(std::shared_ptr<const INode>)> callback) const
+{
+    std::function<void(const std::pair<const std::string, std::shared_ptr<const INode> >& )> internal_callback =
+        [callback](const std::pair<std::string, std::shared_ptr<const INode> >& iter) {
+        callback(iter.second);
+    };
+
+    std::for_each(entries_.begin(), entries_.end(),internal_callback);
+    return;
+
 }

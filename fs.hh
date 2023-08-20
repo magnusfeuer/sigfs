@@ -133,18 +133,20 @@ namespace sigfs {
         //
         class INode {
         public:
-            INode(FileSystem& owner, const json & config);
+            INode(FileSystem& owner, const ino_t parent_inode, const json & config);
             virtual ~INode(void) {}
             virtual json to_config(void) const;
 
             bool read_access(uid_t uid, gid_t gid) const;
             bool write_access(uid_t uid, gid_t gid) const;
             const ino_t inode(void) const; 
+            const ino_t parent_inode(void) const;
             const std::string name(void) const;
 
         private:
             const std::string name_;
             const ino_t inode_;
+            const ino_t parent_inode_;
             const UIDAccessControlMap uid_access_;
             const GIDAccessControlMap gid_access_;
         };
@@ -156,20 +158,18 @@ namespace sigfs {
         //
         class File: public INode {
         public:
-            File(FileSystem& owner, const json& config);
-
-            json to_config(void) const;
-
+            File(FileSystem& owner, const ino_t parent_inode, const json& config);
         private:
         };
 
 
         class Directory: public INode {
         public:
-            Directory(FileSystem& owner, const json &config);
+            Directory(FileSystem& owner, const ino_t parent_inode, const json &config);
             json to_config(void) const;
 
             std::shared_ptr<const INode> lookup_entry(const std::string& name) const;
+            void for_each_entry(std::function<void(std::shared_ptr<const INode>)>) const;
 
         private:
             class Entries: public std::map<const std::string, std::shared_ptr<const INode> > {
@@ -182,12 +182,13 @@ namespace sigfs {
     public:
         FileSystem(const json &config);
 
-        const ino_t register_inode(const std::shared_ptr<INode> inode);
+        const ino_t get_next_inode(void);
+        void register_inode(const std::shared_ptr<INode> inode);
         std::shared_ptr<INode> lookup_inode(const ino_t inode) const;
 
         const INode& null_inode(void) const;
 
-        const Directory& root(void) const;
+        std::shared_ptr<const Directory> root(void) const;
         json to_config(void) const;
 
     private:
