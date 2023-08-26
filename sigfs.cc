@@ -117,6 +117,22 @@ static void do_destroy(void* userdata)
     SIGFS_LOG_DEBUG("do_destroy(): Called");
 }
 
+void setup_stat(std::shared_ptr<const FileSystem::INode> entry, struct stat* attr)
+{
+    // TODO: Add correct access permissions.
+
+    // Do we have a directory
+    if (typeid(*entry) == typeid(const FileSystem::Directory)) {
+        attr->st_mode = S_IFDIR | 0755;
+        attr->st_nlink = 2;
+    }
+    // Else we have a file
+    else {
+        attr->st_mode = S_IFREG | 0644;
+        attr->st_nlink = 1;
+    }
+}
+
 static void do_lookup(fuse_req_t req, fuse_ino_t dir_ino, const char *name)
 {
     struct fuse_entry_param e;
@@ -148,9 +164,8 @@ static void do_lookup(fuse_req_t req, fuse_ino_t dir_ino, const char *name)
     e.attr_timeout = 1.0;
     e.entry_timeout = 1.0;
 
-    // TODO: Add permissions from access management system!
-    e.attr.st_mode = S_IFREG | 0755;
-    e.attr.st_nlink = 1;
+    // Load the struct stat member with the correct values
+    setup_stat(entry, &e.attr);
     check_fuse_call(SIGFS_NIL_INDEX,
                     fuse_reply_entry(req, &e),
                     "do_lookup(): fuse_reply_entry() returned: ");
@@ -174,48 +189,7 @@ static void do_getattr(fuse_req_t req, fuse_ino_t entry_ino, struct fuse_file_in
     st.st_atime = time(0);
     st.st_mtime = time(0);
 
-/*
-    switch (entry_ino) {
-    case 1: // Rot inode "/"
-        st.st_mode = S_IFDIR | 0755;
-        st.st_nlink = 2;
-        SIGFS_LOG_DEBUG( "----------------do_getattr(inode: %lu): Setting mode to 0%ho" , entry_ino, st.st_mode);
-        break;
-
-    case 2: // Signal inode "/signal"
-        st.st_mode = S_IFREG | 0644;
-        st.st_nlink = 1;
-        SIGFS_LOG_DEBUG( "----------------do_getattr(inode: %lu): Setting mode to 0%ho" , entry_ino, st.st_mode);
-        break;
-
-    default:
-        check_fuse_call(SIGFS_NIL_INDEX,
-                        fuse_reply_err(req, ENOENT),
-                        "do_getattr(): fuse_reply_err(ENOENT) returned: ");
-        return;
-    }
-
-
-    check_fuse_call(SIGFS_NIL_INDEX,
-                    fuse_reply_attr(req, &st, 1.0), // No idea about a good timeout value
-                    "do_getattr(): fuse_reply_attr(ENOENT) returned: ");
-
-    SIGFS_LOG_DEBUG("do_getattr(): Inode [%lu] not supported. Return ENOENT", entry_ino);
-    return;
-*/
-
-    // Do we have a directory
-    if (typeid(*entry) == typeid(const FileSystem::Directory)) {
-        st.st_mode = S_IFDIR | 0755;
-        st.st_nlink = 2;
-        SIGFS_LOG_DEBUG( "----------------do_getattr(inode: %lu): Setting mode to 0%ho" , entry_ino, st.st_mode);
-    }
-    // Else we have a file
-    else {
-        st.st_mode = S_IFREG | 0644;
-        st.st_nlink = 1;
-        SIGFS_LOG_DEBUG( "----------------do_getattr(inode: %lu): Setting mode to 0%ho" , entry_ino, st.st_mode);
-    }
+    setup_stat(entry, &st);
 
     int res = fuse_reply_attr(req, &st, 1.0);
     check_fuse_call(SIGFS_NIL_INDEX,
