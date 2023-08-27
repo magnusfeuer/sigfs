@@ -16,7 +16,7 @@ FileSystem::INode::INode(FileSystem& owner,
                          const ino_t parent_inode,
                          const json & config):
     name_(config["name"]),
-    owner_(owner), 
+    owner_(owner),
     inode_(owner.get_next_inode()),
     parent_inode_(parent_inode),
     uid_access_(UIDAccessControlMap(config.value("uid_access", json::array()))),
@@ -24,13 +24,13 @@ FileSystem::INode::INode(FileSystem& owner,
     parent_entry_(nullptr),
     access_is_cached_(false)
 {
-    std::cout << "INode::INode(): inode_=" << inode() << "   " << "name_=" << name() << std::endl;
 }
 
 json FileSystem::INode::to_config(void) const
 {
     return json( {
             { "inode", inode_ },
+            { "parent", parent_inode_ },
             { "name", name_ },
             { "uid_access", uid_access_.to_config() },
             { "gid_access", gid_access_.to_config() }
@@ -72,7 +72,7 @@ std::shared_ptr<FileSystem::INode> FileSystem::INode::parent_entry(void)
 
 void FileSystem::INode::import_inherited_access_rights(uid_t uid, gid_t gid)
 {
-    // Don't do this we are root (no parent), or if we have
+    // Don't do this we are root (i.e. we have no), or if we have
     // already been here before.
     if (inode() == FileSystem::root_inode() || access_is_cached_)
         return;
@@ -82,36 +82,39 @@ void FileSystem::INode::import_inherited_access_rights(uid_t uid, gid_t gid)
     auto parent = parent_entry();
 
 
-    SIGFS_LOG_DEBUG("import_inherited_access_rights(uid[%u], gid[%u], name[%s]): Called",
-                    uid, gid, name().c_str());
+    // Get self's access map for the given uid and gid
+    // If we have no entry for the given UID, create it as an empty entry.
+    auto uid_rights = uid_access_.find(uid);
+
+    if (uid_rights == uid_access_.end()) {
+        // Insert will always succeed since we know uid does not exist in map
+        uid_rights = uid_access_.insert(std::pair(uid, json())).first;
+        //uid_access_.emplace(std::make_pair(uid, FileSystem::Access(json())));
+    }
+
+    // Do the same thing for our GID
+    auto gid_rights = gid_access_.find(gid);
+
+    if (gid_rights == gid_access_.end()) {
+        // Insert will always succeed since we know gid does not exist in map
+        gid_rights = gid_access_.insert(std::pair(gid, json())).first;
+    }
+
     //
     // Traverse all parents until root is encoutered and add any inherited
     // access to my local access map
     //
-    do {
+    while(true) {
         // Paranoid scoping since we are dealing with security here.
         {
             bool uid_can_read(false);
             bool uid_can_write(false);
             bool uid_access_is_inherited(false);
 
-            // Get self's access map for the given uid and gid
-            // If we have no entry for the given UID, create it.
-            auto uid_rights = uid_access_.find(uid);
-
-            if (uid_rights == uid_access_.end()) {
-                // Insert will always succeed since we know uid does not exist in map
-                uid_access_.emplace(std::make_pair(uid, FileSystem::Access(json())));
-            }
             parent->get_uid_access(uid,
                                    uid_can_read,
                                    uid_can_write,
                                    uid_access_is_inherited);
-
-           SIGFS_LOG_DEBUG("import_inherited_access_rights(uid[%u], gid[%u], name[%s]):      UID: Parent %s - read[%c] write[%c] inherited[%c]",
-                           uid, gid, name().c_str(), parent->name().c_str(),
-                           uid_can_read, uid_can_write, uid_access_is_inherited);
-
 
             // Only update if the (grand-(grand-)(...-))-parent's access map is
             // to be inherited by us.
@@ -120,24 +123,15 @@ void FileSystem::INode::import_inherited_access_rights(uid_t uid, gid_t gid)
 
                 // If we have an inherited read access, force it through here for the given uid
                 if (uid_can_read) {
-                    SIGFS_LOG_DEBUG("import_inherited_access_rights(uid[%u], gid[%u], name[%s]):      UID: Inherited read access from %s",
-                                    uid, gid, name().c_str(), parent->name().c_str());
-                    (*uid_rights).second.set_read_access(true);
+                    uid_rights->second.set_read_access(true);
                 }
 
                 // If we have an inherited write access, force it through here for the given uid
                 if (uid_can_write) {
-                    SIGFS_LOG_DEBUG("import_inherited_access_rights(uid[%u], gid[%u], name[%s]):      UID: Inherited write access from %s",
-                                    uid, gid, name().c_str(), parent->name().c_str());
-                    (*uid_rights).second.set_write_access(true);
+                    uid_rights->second.set_write_access(true);
                 }
 
             }
-            else {
-                SIGFS_LOG_DEBUG("import_inherited_access_rights(uid[%u], gid[%u], name[%s]):      UID: No inheritance from %s",
-                                uid, gid, name().c_str(), parent->name().c_str());
-            }
-
         }
 
         // Do the same thing for GID
@@ -146,22 +140,10 @@ void FileSystem::INode::import_inherited_access_rights(uid_t uid, gid_t gid)
             bool gid_can_write(false);
             bool gid_access_is_inherited(false);
 
-            // Get self's access map for the given gid and gid
-            // If we have no entry for the given GID, create it.
-            auto gid_rights = gid_access_.find(gid);
-
-            if (gid_rights == gid_access_.end()) {
-                // Insert will always succeed since we know gid does not exist in map
-                gid_rights = gid_access_.insert(std::pair(gid, json())).first;
-            }
             parent->get_gid_access(gid,
                                    gid_can_read,
                                    gid_can_write,
                                    gid_access_is_inherited);
-
-           SIGFS_LOG_DEBUG("import_inherited_access_rights(uid[%u], gid[%u], name[%s]):      GID: Parent %s - read[%c] write[%c] inherited[%c]",
-                           uid, gid, name().c_str(), parent->name().c_str(),
-                           gid_can_read, gid_can_write, gid_access_is_inherited);
 
             // Only update if the (grand-(grand-)(...-))-parent's access map is
             // to be inherited by us.
@@ -169,27 +151,33 @@ void FileSystem::INode::import_inherited_access_rights(uid_t uid, gid_t gid)
 
                 // If we have an inherited read access, force it through here for the given gid
                 if (gid_can_read) {
-                    SIGFS_LOG_DEBUG("import_inherited_access_rights(uid[%u], gid[%u], name[%s]):      GID: Inherited read access from %s",
-                                    uid, gid, name().c_str(), parent->name().c_str());
-                    (*gid_rights).second.set_read_access(true);
+                    gid_rights->second.set_read_access(true);
                 }
 
                 // If we have an inherited write access, force it through here for the given gid
                 if (gid_can_write) {
-                    SIGFS_LOG_DEBUG("import_inherited_access_rights(uid[%u], gid[%u], name[%s]):      GID: Inherited write access from %s",
-                                    uid, gid, name().c_str(), parent->name().c_str());
-                    (*gid_rights).second.set_write_access(true);
+                    gid_rights->second.set_write_access(true);
                 }
             }
-            else {
-                SIGFS_LOG_DEBUG("import_inherited_access_rights(uid[%u], gid[%u], name[%s]):      GID: No inheritance from %s",
-                                uid, gid, name().c_str(), parent->name().c_str());
-            }
+
         }
 
-        // Move up to grandparent.
+        // Waas this the root inode?
+        // If so, break out.
+        if (parent->inode() == FileSystem::root_inode()) {
+            break;
+        }
+
+        // Step up to grandparent.
         parent = parent->parent_entry();
-    } while(parent->inode() != FileSystem::root_inode());
+    }
+
+    SIGFS_LOG_DEBUG("import_inherited_access_rights(uid[%u], gid[%u], name[%s]):      Result - uid_read[%c] uid_write[%c] gid_read[%c] gid_write[%c]",
+                    uid, gid, name().c_str(),
+                    ((uid_rights->second.get_read_access())?'Y':'N'),
+                    ((uid_rights->second.get_write_access())?'Y':'N'),
+                    ((gid_rights->second.get_read_access())?'Y':'N'),
+                    ((gid_rights->second.get_write_access())?'Y':'N'));
 
     access_is_cached_ = true;
 }
@@ -208,9 +196,9 @@ void FileSystem::INode::get_uid_access(uid_t uid,
         return;
     }
 
-    uid_can_read = (*uid_rights).second.get_read_access();
-    uid_can_write = (*uid_rights).second.get_write_access();
-    access_is_inherited = (*uid_rights).second.get_inherit_flag();
+    uid_can_read = uid_rights->second.get_read_access();
+    uid_can_write = uid_rights->second.get_write_access();
+    access_is_inherited = uid_rights->second.get_inherit_flag();
     return;
 }
 
@@ -228,9 +216,9 @@ void FileSystem::INode::get_gid_access(gid_t gid,
         return;
     }
 
-    gid_can_read = (*gid_rights).second.get_read_access();
-    gid_can_write = (*gid_rights).second.get_write_access();
-    access_is_inherited = (*gid_rights).second.get_inherit_flag();
+    gid_can_read = gid_rights->second.get_read_access();
+    gid_can_write = gid_rights->second.get_write_access();
+    access_is_inherited = gid_rights->second.get_inherit_flag();
     return;
 }
 

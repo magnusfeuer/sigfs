@@ -27,11 +27,6 @@ FileSystem::Directory::Directory(FileSystem& owner, const ino_t parent_inode, co
 
         // Anything with an "entries" element is a directory.
         if (entry.contains("entries")) {
-            // std::shared_ptr<INode>  inode_entry = std::make_shared<Directory>(owner, entry);
-            // auto dir_entry = std::dynamic_pointer_cast<FileSystem::Directory>(inode_entry);
-
-            // SIGFS_LOG_ERROR("dir_entry(): %s", dir_entry->name().c_str());
-
             auto new_dir = std::make_shared<Directory>(owner, inode(), entry);
             entries_.insert(std::pair (name, new_dir));
             owner.register_inode(new_dir);
