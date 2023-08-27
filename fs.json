@@ -9,12 +9,25 @@
         ],
         "gid_access": [],
         "entries": [
-            { "name": "speed" },
+            { "name": "f1" },
             {
-                "name": "subdir",
-                 "entries": [
+                "name": "s1",
+                "entries": [
                     { "name": "f1" },
-                    { "name": "f2" }
+                    { "name": "f2" },
+                    { "name": "f3" },
+                    { "name": "s1",
+                      "gid_access": [
+                          {
+                              "gid": 1000,
+                              "access": [ "write" ]
+                          }
+                      ],
+                      "entries": [
+                          { "name": "f1" },
+                          { "name": "f2" }
+                      ]
+                    }
                 ]
             }
         ]
