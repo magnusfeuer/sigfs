@@ -66,7 +66,7 @@ json FileSystem::Directory::Entries::to_config(void) const
     return lst;
 }
 
-std::shared_ptr<const FileSystem::INode>
+std::shared_ptr<FileSystem::INode>
 FileSystem::Directory::lookup_entry(const std::string& lookup_name) const
 {
     auto res = entries_.find(lookup_name);
@@ -81,14 +81,13 @@ FileSystem::Directory::lookup_entry(const std::string& lookup_name) const
 }
 
 
-void FileSystem::Directory::for_each_entry(std::function<void(std::shared_ptr<const INode>)> callback) const
+void FileSystem::Directory::for_each_entry(std::function<void(std::shared_ptr<INode>)> callback) const
 {
-    std::function<void(const std::pair<const std::string, std::shared_ptr<const INode> >& )> internal_callback =
-        [callback](const std::pair<std::string, std::shared_ptr<const INode> >& iter) {
+    std::function<void(const std::pair<const std::string, std::shared_ptr<INode> >& )> internal_callback =
+        [callback](const std::pair<std::string, std::shared_ptr<INode> >& iter) {
         callback(iter.second);
     };
 
     std::for_each(entries_.begin(), entries_.end(),internal_callback);
     return;
-
 }

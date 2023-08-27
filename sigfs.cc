@@ -117,33 +117,65 @@ static void do_destroy(void* userdata)
     SIGFS_LOG_DEBUG("do_destroy(): Called");
 }
 
-void setup_stat(std::shared_ptr<const FileSystem::INode> entry, struct stat* attr)
+void setup_stat(std::shared_ptr<FileSystem::INode> entry, uid_t uid, gid_t gid, struct stat* attr)
 {
-    // TODO: Add correct access permissions.
+    bool can_read(false);
+    bool can_write(false);
+
+    entry->get_access(uid, gid, can_read, can_write);
 
     // Do we have a directory
-    if (typeid(*entry) == typeid(const FileSystem::Directory)) {
-        attr->st_mode = S_IFDIR | 0755;
+    if (typeid(*entry) == typeid(FileSystem::Directory)) {
+        attr->st_mode = S_IFDIR;
+        if (can_read)
+            attr->st_mode |= (S_IRUSR | S_IXUSR);
+
+        if (can_write)
+            attr->st_mode |= S_IWUSR;
+
         attr->st_nlink = 2;
+        SIGFS_LOG_DEBUG("setup_stat(%s): Directory: uid[%u] gid[%u] can_read[%c] can_write[%c] -> st_mode[%o]",
+                        entry->name().c_str(), uid, gid,
+                        (can_read?'Y':'N'),
+                        (can_write?'Y':'N'),
+                        attr->st_mode);
     }
     // Else we have a file
     else {
-        attr->st_mode = S_IFREG | 0644;
+        attr->st_mode = S_IFREG;
+
+        if (can_read)
+            attr->st_mode |= S_IRUSR;
+
+        if (can_write)
+            attr->st_mode |= S_IWUSR;
+
+        // Directory access is not reflected in file access bitmap.
         attr->st_nlink = 1;
+        SIGFS_LOG_DEBUG("setup_stat(%s): File: uid[%u] gid[%u] can_read[%c] can_write[%c] -> st_mode[%o]",
+                        entry->name().c_str(), uid, gid,
+                        (can_read?'Y':'N'),
+                        (can_write?'Y':'N'),
+                        attr->st_mode);
     }
+
+    attr->st_ino = entry->inode();
+    attr->st_uid = uid;
+    attr->st_gid = gid;
+    attr->st_mtime = attr->st_atime = time(0);
 }
 
 static void do_lookup(fuse_req_t req, fuse_ino_t dir_ino, const char *name)
 {
     struct fuse_entry_param e;
-    auto dir = std::dynamic_pointer_cast<const FileSystem::Directory>(g_fsys->lookup_inode(dir_ino));
+    auto dir = std::dynamic_pointer_cast<FileSystem::Directory>(g_fsys->lookup_inode(dir_ino));
 
     SIGFS_LOG_DEBUG("do_lookup( dir_inode: %lu, entry_name: %s): Called", dir_ino, name);
 
     if (dir == nullptr) {
         auto entry = g_fsys->lookup_inode(dir_ino);
         SIGFS_LOG_ERROR("do_lookup(inode: %lu, name: %s, entry_name: %s): Parent not directory. JSON:\n%s\n",
-                        dir_ino, entry->name(), name, entry->to_config().dump(4).c_str());
+                        dir_ino, entry->name().c_str(), name, entry->to_config().dump(4).c_str());
         abort();
     }
 
@@ -164,8 +196,15 @@ static void do_lookup(fuse_req_t req, fuse_ino_t dir_ino, const char *name)
     e.attr_timeout = 1.0;
     e.entry_timeout = 1.0;
 
-    // Load the struct stat member with the correct values
-    setup_stat(entry, &e.attr);
+    // Get extended context
+    const struct fuse_ctx* ctx = fuse_req_ctx(req);
+
+    // Make it look like the caller is the owner.
+    setup_stat(entry, ctx->uid, ctx->gid, &e.attr);
+
+
+    SIGFS_LOG_DEBUG("do_lookup( dir_inode: %lu, entry_name: %s): Attributes: 0%o", dir_ino, name, e.attr.st_mode);
+
     check_fuse_call(SIGFS_NIL_INDEX,
                     fuse_reply_entry(req, &e),
                     "do_lookup(): fuse_reply_entry() returned: ");
@@ -178,30 +217,19 @@ static void do_getattr(fuse_req_t req, fuse_ino_t entry_ino, struct fuse_file_in
     struct stat st {}; // Init to default values (== 0)
 
     auto entry = g_fsys->lookup_inode(entry_ino);
-
+    const struct fuse_ctx* ctx = fuse_req_ctx(req);
     SIGFS_LOG_DEBUG( "do_getattr(inode: %lu): Resolved to: %s" , entry_ino, entry->name().c_str());
 
     (void) fi;
 
-    st.st_ino = entry_ino;
-    st.st_uid = getuid();
-    st.st_gid = getgid();
-    st.st_atime = time(0);
-    st.st_mtime = time(0);
-
-    setup_stat(entry, &st);
+    // Make it look like the caller is the owner.
+    setup_stat(entry, ctx->uid, ctx->gid, &st);
 
     int res = fuse_reply_attr(req, &st, 1.0);
     check_fuse_call(SIGFS_NIL_INDEX,
                     res,
                     "do_getattr( dir_inode: %lu, entry_name: %s): Failed", entry_ino, entry->name().c_str());
 
-
-    // if (_sigfs_log_level == SIGFS_LOG_LEVEL_DEBUG) {
-    //     char prefix[1025];
-    //     sprintf(prefix, "do_getattr( dir_inode: %lu, entry_name: %s): File attributes: ", entry_ino, entry->name().c_str());
-    //     print_file_info(prefix, st.st_mode);
-    // }
     return;
 
 }
@@ -250,7 +278,7 @@ static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
                       off_t off, struct fuse_file_info *fi)
 {
     SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu): Called", dir_inode);
-    auto dir = std::dynamic_pointer_cast<const FileSystem::Directory>(g_fsys->lookup_inode(dir_inode));
+    auto dir = std::dynamic_pointer_cast<FileSystem::Directory>(g_fsys->lookup_inode(dir_inode));
 
     // g_fsys->lookup_inode() will termiante program if inode not found.
     // If we have a null pointer here, it is because dymaic cast is failing due to
@@ -269,7 +297,7 @@ static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
     dirbuf_add(req, &b, ".", dir_inode);
     dirbuf_add(req, &b, "..", dir->parent_inode());
 
-    dir->for_each_entry([&dir_inode, &req, &b, &dir](const std::shared_ptr<const FileSystem::INode> entry) {
+    dir->for_each_entry([&dir_inode, &req, &b, &dir](const std::shared_ptr<FileSystem::INode> entry) {
         SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu, dir_name: %s): Adding entry %s", dir_inode, dir->name().c_str(), entry->name().c_str());
         dirbuf_add(req, &b, entry->name().c_str(), entry->inode());
     });
@@ -277,7 +305,7 @@ static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
                     reply_buf_limited(req, b.p, b.size, off, size),
                     "do_readdir(): reply_buf_limited() returned: ");
 
-    SIGFS_LOG_DEBUG("do_readdir(): Returning root entry \"signal\".");
+    SIGFS_LOG_DEBUG("do_readdir(): Done.");
 
     free(b.p);
     return;
@@ -667,7 +695,7 @@ int main( int argc,  char **argv )
 /*
           .readlink    = do_readlink,
           .mknod       = do_mknod,
-+          .mkdir       = do_mkdir,
+          .mkdir       = do_mkdir,
           .unlink      = do_unlink,
           .rmdir       = do_rmdir,
           .symlink     = do_symlink,

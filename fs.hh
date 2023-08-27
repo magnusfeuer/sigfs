@@ -26,57 +26,65 @@ namespace sigfs {
 
 
     public:
-        // Encapslulated types 
+        // Encapslulated types
 
         using ino_t=uint64_t;
 
         // Access specifier.
         // JSON config format:
-        // {
-        //   { "read": true|false },    Optional
-        //   { "write": true|false }    Optional
-        // }
+        // [
+        //   "read"
+        //   "write"
+        //   "inherited"
+        // ]
         //
-        // Default value for "read" is false
-        // Default value for "write" is false
+        // Default for all values is false
+        //
+        // "read" specifies if the given "uid" should be able to read
+        //        to a signal file or enter a directory.
+        //
+        // "write" specified if the given "uid" should be able to
+        //         write to a signal file
+        //
+        // "inherited" specifies if this access should be inherited by
+        //             subdirectories and their signal files
+        //
         class Access {
         public:
-            Access(const json & config, bool inherited = false);
+            Access(const json & config);
             json to_config(void) const;
 
-            bool read_access(void) const;
-            bool write_access(void) const;
-            bool inherited(void) const;
+            bool get_read_access(void) const;
+            bool get_write_access(void) const;
+            bool get_inherit_flag(void) const;
+
+            void set_read_access(bool can_read);
+            void set_write_access(bool can_write);
+            void set_inherit_flag(bool inherit_flag);
 
         private:
-            bool read_access_ = false; // Default init for extra security
+            bool read_access_ = false;
             bool write_access_ = false;
-            bool inherited_ = false;
+            bool inherit_flag_ = false;
         };
-
 
 
         // Access control map for user IDs
         // JSON config format:
-        // [
         //   {
-        //     "uid": 1001, {
-        //       "read": true,
-        //        "write": false
-        //     }
+        //     "uid": 1001,
+        //     "access": [ "read", "directory", "write", "inherit" ]
         //   },
         //   {
         //     "uid": 1002, {
-        //       "read": true,
-        //        "write": true
-        //     }
+        //     "access": [ "read" ]
         //   }
         // ]
         //
-        //
         // "uid" specifies the user ID that is to be access managed
-        // "read" specifies if the given "uid" should be able to read to a signal file
-        // "write" specified if the given "uid" should be able to write to a signal file
+        //
+        // "access" specifies access profile for the user, See Access
+        //          documentation for details.
         //
         class UIDAccessControlMap: public std::map<uid_t, Access> {
         public:
@@ -86,25 +94,7 @@ namespace sigfs {
         };
 
         // Access control map for Group IDs
-        // JSON config format:
-        // [
-        //   {
-        //     "gid": 1001, {
-        //       "read": true,
-        //        "write": false
-        //     }
-        //   },
-        //   {
-        //     "gid": 1002, {
-        //       "read": true,
-        //        "write": true
-        //     }
-        //   }
-        // ]
-        //
-        // "gid" specifies the group ID that is to be access managed
-        // "read" specifies if the given "gid" should be able to read to a signal file
-        // "write" specified if the given "gid" should be able to write to a signal file
+        // Same as abovem but for user groups.
         //
         class GIDAccessControlMap: public std::map<gid_t, Access> {
         public:
@@ -114,22 +104,9 @@ namespace sigfs {
 
         //
         // {
-        //   name: "vehicle_speed",               // Mandatory
-        //   "gid_access": [                      // Optional. See GIDAccessControlMap
-        //     {
-        //       "gid": 1001, {                   // Optiona. See UIDAccessControlMap
-        //         "read": true,
-        //          "write": false
-        //       }
-        //     },
-        //     {
-        //       "gid": 1002, {
-        //         "read": true,
-        //          "write": true
-        //       }
-        //     }
-        //   ]
-        // }
+        //   name: "vehicle_speed",               // Mandatory name of entry
+        //   "uid_access": ...                    // See UIDAccessControlMap
+        //   "gid_access": ...                    // See GIDAccessControlMap
         //
         class INode {
         public:
@@ -137,20 +114,40 @@ namespace sigfs {
             virtual ~INode(void) {}
             virtual json to_config(void) const;
 
-            bool read_access(uid_t uid, gid_t gid) const;
-            bool write_access(uid_t uid, gid_t gid) const;
-            const ino_t inode(void) const; 
+            void get_access(uid_t uid,
+                            gid_t gid,
+                            bool& can_read,
+                            bool& can_write);
+
+            std::shared_ptr<INode> parent_entry(void);
+            const ino_t inode(void) const;
             const ino_t parent_inode(void) const;
             const std::string name(void) const;
+            const FileSystem& owner(void) const;
+
+        private:
+            void import_inherited_access_rights(uid_t uid, gid_t gid);
+            void get_uid_access(uid_t uid,
+                                bool& uid_can_read,
+                                bool& uid_can_write,
+                                bool& access_is_inherited) const;
+
+            void get_gid_access(gid_t gid,
+                                bool& gid_can_read,
+                                bool& gid_can_write,
+                                bool& access_is_inherited) const;
+
 
         private:
             const std::string name_;
+            const FileSystem& owner_;
             const ino_t inode_;
             const ino_t parent_inode_;
-            const UIDAccessControlMap uid_access_;
-            const GIDAccessControlMap gid_access_;
+            UIDAccessControlMap uid_access_;
+            GIDAccessControlMap gid_access_;
+            std::shared_ptr<INode> parent_entry_;
+            bool access_is_cached_;
         };
-
 
 
         // Currently no extra members in addition to those
@@ -168,11 +165,11 @@ namespace sigfs {
             Directory(FileSystem& owner, const ino_t parent_inode, const json &config);
             json to_config(void) const;
 
-            std::shared_ptr<const INode> lookup_entry(const std::string& name) const;
-            void for_each_entry(std::function<void(std::shared_ptr<const INode>)>) const;
+            std::shared_ptr<INode> lookup_entry(const std::string& name) const;
+            void for_each_entry(std::function<void(std::shared_ptr<INode>)>) const;
 
         private:
-            class Entries: public std::map<const std::string, std::shared_ptr<const INode> > {
+            class Entries: public std::map<const std::string, std::shared_ptr<INode> > {
             public:
                 json to_config(void) const;
             };
@@ -184,15 +181,15 @@ namespace sigfs {
 
         const ino_t get_next_inode(void);
         void register_inode(const std::shared_ptr<INode> inode);
-        std::shared_ptr<const INode> lookup_inode(const ino_t inode) const;
+        std::shared_ptr<INode> lookup_inode(const ino_t inode) const;
 
-        const INode& null_inode(void) const;
 
-        std::shared_ptr<const Directory> root(void) const;
+        std::shared_ptr<Directory> root(void) const;
         json to_config(void) const;
+        static ino_t root_inode(void) { return ino_t(ROOT_INODE); }
 
     private:
-        static constexpr int DEFAULT_ROOT_INODE = 2; // As per Linux tradition
+        static constexpr int ROOT_INODE = 1;
 
         enum DefaultAccess {
             DefaultNoAccess = 0,

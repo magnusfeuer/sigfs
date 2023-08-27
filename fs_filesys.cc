@@ -13,7 +13,7 @@
 using namespace sigfs;
 
 FileSystem::FileSystem(const nlohmann::json& config):
-    next_inode_nr_(1), // 1 is what parent is set to for root in for sigfs.cc::do_lookup()
+    next_inode_nr_(root_inode()), // is what parent is set to for root in for sigfs.cc::do_lookup()
     inherit_access_rights_(config.value("inherit_access_rights", false)),
     root_(std::make_shared<Directory>(*this, 1, config["root"])) // Initialize root recursively with config data
 {
@@ -41,7 +41,7 @@ const ino_t FileSystem::get_next_inode()
     return next_inode_nr_++;
 }
 
-std::shared_ptr<const FileSystem::INode> FileSystem::lookup_inode(const ino_t lookup_inode) const
+std::shared_ptr<FileSystem::INode> FileSystem::lookup_inode(const ino_t lookup_inode) const
 {
     auto res = inode_entries_.find(lookup_inode);
 
@@ -54,7 +54,7 @@ std::shared_ptr<const FileSystem::INode> FileSystem::lookup_inode(const ino_t lo
 }
 
 
-std::shared_ptr<const FileSystem::Directory> FileSystem::root(void) const
+std::shared_ptr<FileSystem::Directory> FileSystem::root(void) const
 {
     return root_;
 }

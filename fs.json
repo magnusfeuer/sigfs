@@ -4,8 +4,7 @@
         "uid_access": [
             {
                 "uid": 1000,
-                "inherit": true,
-                "access": [ "read" ]
+                "access": [ "read", "inherited" ]
             }
         ],
         "gid_access": [],
@@ -13,7 +12,7 @@
             { "name": "speed" },
             {
                 "name": "subdir",
-                "entries": [
+                 "entries": [
                     { "name": "f1" },
                     { "name": "f2" }
                 ]
