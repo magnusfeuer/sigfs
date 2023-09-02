@@ -125,7 +125,7 @@ void setup_stat(std::shared_ptr<FileSystem::INode> entry, uid_t uid, gid_t gid, 
     entry->get_access(uid, gid, can_read, can_write);
 
     // Do we have a directory
-    if (typeid(*entry) == typeid(FileSystem::Directory)) {
+    if (FileSystem::Directory::is_directory(entry)) {
         attr->st_mode = S_IFDIR;
         if (can_read)
             attr->st_mode |= (S_IRUSR | S_IXUSR);
@@ -168,19 +168,18 @@ void setup_stat(std::shared_ptr<FileSystem::INode> entry, uid_t uid, gid_t gid, 
 static void do_lookup(fuse_req_t req, fuse_ino_t dir_ino, const char *name)
 {
     struct fuse_entry_param e;
-    auto dir = std::dynamic_pointer_cast<FileSystem::Directory>(g_fsys->lookup_inode(dir_ino));
 
     SIGFS_LOG_DEBUG("do_lookup( dir_inode: %lu, entry_name: %s): Called", dir_ino, name);
 
-    if (dir == nullptr) {
-        auto entry = g_fsys->lookup_inode(dir_ino);
-        SIGFS_LOG_ERROR("do_lookup(inode: %lu, name: %s, entry_name: %s): Parent not directory. JSON:\n%s\n",
-                        dir_ino, entry->name().c_str(), name, entry->to_config().dump(4).c_str());
+    auto dir = g_fsys->lookup_inode(dir_ino);
+    if (!FileSystem::Directory::is_directory(dir)) {
+        SIGFS_LOG_ERROR("do_lookup(inode: %lu, name: %s, dir_name: %s): Parent directory not a directory. JSON:\n%s\n",
+                        dir_ino, dir->name().c_str(), name, dir->to_config().dump(4).c_str());
         abort();
     }
 
     // Lookup entry
-    auto entry = dir->lookup_entry(name);
+    auto entry = std::dynamic_pointer_cast<FileSystem::Directory>(dir)->lookup_entry(name);
 
     // Not found?
     if (!entry) {
@@ -278,29 +277,33 @@ static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
                       off_t off, struct fuse_file_info *fi)
 {
     SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu): Called", dir_inode);
-    auto dir = std::dynamic_pointer_cast<FileSystem::Directory>(g_fsys->lookup_inode(dir_inode));
+
+    auto entry = g_fsys->lookup_inode(dir_inode);
 
     // g_fsys->lookup_inode() will termiante program if inode not found.
     // If we have a null pointer here, it is because dymaic cast is failing due to
     // the fact that we are trying to read the directory entries of a file
     //
-    if (dir == nullptr) {
+    if (!FileSystem::Directory::is_directory(entry)) {
         SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu): Inode is not a directory.\n", dir_inode);
         fuse_reply_err(req, ENOTDIR);
         return;
     }
+
+    auto dir_entry = std::dynamic_pointer_cast<FileSystem::Directory>(entry);
 
     (void) fi;
     struct dirbuf b;
 
     memset(&b, 0, sizeof(b));
     dirbuf_add(req, &b, ".", dir_inode);
-    dirbuf_add(req, &b, "..", dir->parent_inode());
+    dirbuf_add(req, &b, "..", dir_entry->parent_inode());
 
-    dir->for_each_entry([&dir_inode, &req, &b, &dir](const std::shared_ptr<FileSystem::INode> entry) {
-        SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu, dir_name: %s): Adding entry %s", dir_inode, dir->name().c_str(), entry->name().c_str());
+    dir_entry->for_each_entry([&dir_inode, &req, &b, &dir_entry](const std::shared_ptr<FileSystem::INode> entry) {
+        SIGFS_LOG_DEBUG("do_readdir(dir_inode: %lu, dir_name: %s): Adding entry %s", dir_inode, dir_entry->name().c_str(), entry->name().c_str());
         dirbuf_add(req, &b, entry->name().c_str(), entry->inode());
     });
+
     check_fuse_call(SIGFS_NIL_INDEX,
                     reply_buf_limited(req, b.p, b.size, off, size),
                     "do_readdir(): reply_buf_limited() returned: ");
@@ -313,19 +316,57 @@ static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
 
 
 
-static void do_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info *fi)
 {
-    SIGFS_LOG_DEBUG("do_open(%lu): Called", ino );
-    print_file_info("do_open():", fi->flags);
-    if (ino != 2) {
+    SIGFS_LOG_DEBUG("do_open(file_inode: %lu): Called", file_inode);
+
+    auto file_entry = g_fsys->lookup_inode(file_inode);
+
+    // g_fsys->lookup_inode() will termiante program if inode not found.
+    // If we have a null pointer here, it is because dymaic cast is failing due to
+    // the fact that we are trying to read the directory entries of a file
+    //
+    if (!FileSystem::File::is_file(file_entry)) {
+        SIGFS_LOG_DEBUG("do_open(file_inode: %lu): Inode is not a file.\n", file_inode);
         fuse_reply_err(req, EISDIR);
         return;
     }
 
-    // if (!(fi->flags & (O_RDONLY | O_WRONLY))) {
-    //     fuse_reply_err(req, EACCES);
-    //     return;
-    // }
+    // Check access.
+    const struct fuse_ctx* ctx = fuse_req_ctx(req);
+    SIGFS_LOG_DEBUG( "do_open(file_inode: %lu): Checking access for: %s" , file_inode, file_entry->name().c_str());
+
+    bool can_read(false);
+    bool can_write(false);
+
+    file_entry->get_access(ctx->uid, ctx->gid, can_read, can_write);
+
+    (void) fi;
+
+    //
+    // Make sure we are not opening for both read and writ
+    //
+    if (fi->flags & O_RDWR) {
+        SIGFS_LOG_DEBUG( "do_open(file_inode: %lu): %s: Tried to open for read and write. Access denied" , file_inode, file_entry->name().c_str());
+        fuse_reply_err(req, EACCES);
+        return;
+    }
+
+    //
+    // Are we allowed to open for reading?
+    //
+    if ((fi->flags & O_RDONLY) && !can_read) {
+        SIGFS_LOG_DEBUG( "do_open(file_inode: %lu): %s: Tried to open for read with no permission. Access denied" , file_inode, file_entry->name().c_str());
+        fuse_reply_err(req, EACCES);
+        return;
+    }
+
+    // Are we allowed to open for writing?
+    if ((fi->flags & O_WRONLY) && !can_write) {
+        SIGFS_LOG_DEBUG( "do_open(file_inode: %lu): %s: Tried to open for write with no permission. Access denied" , file_inode, file_entry->name().c_str());
+        fuse_reply_err(req, EACCES);
+        return;
+    }
 
     Subscriber *sub = new Subscriber(*g_queue);
     fi->fh = (uint64_t) sub; // It works. Stop whining.
@@ -351,8 +392,6 @@ static void read_interrupt(fuse_req_t req, void *data)
 static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
                     off_t offset, struct fuse_file_info *fi)
 {
-    // It works. Stop whining.
-    Subscriber* sub{(Subscriber*) fi->fh};
 
 
     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(%lu): Called. Size[%lu]. offset[%ld]", ino, size, offset);
@@ -362,6 +401,9 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
         fuse_reply_err(req, EPERM);
         return;
     }
+
+    // It works. Stop whining.
+    Subscriber* sub{(Subscriber*) fi->fh};
 
     // if (offset != 0) {
     //     SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "do_read(): Offset %lu not implemented.", offset);
@@ -626,7 +668,7 @@ void usage(const char* name)
 
 // Nil functions that we don't want to pollute the source file with
 
-int main( int argc,  char **argv )
+int main(int argc, char **argv)
 {
     std::string config_file("fs.json");
     int ch = 0;
@@ -776,4 +818,5 @@ err_out1:
     fuse_opt_free_args(&args);
 
     return ret ? 1 : 0;
+    print_file_info("",0); // To get gcc to STFU about unused funcitons.
 }

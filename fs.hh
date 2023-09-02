@@ -156,6 +156,14 @@ namespace sigfs {
         class File: public INode {
         public:
             File(FileSystem& owner, const ino_t parent_inode, const json& config);
+            static bool is_file(INode* obj) {
+                return (dynamic_cast<File*>(obj) != nullptr);
+            }
+
+            static bool is_file(std::shared_ptr<INode> obj) {
+                return (std::dynamic_pointer_cast<File>(obj) != nullptr);
+            }
+
         private:
         };
 
@@ -167,6 +175,14 @@ namespace sigfs {
 
             std::shared_ptr<INode> lookup_entry(const std::string& name) const;
             void for_each_entry(std::function<void(std::shared_ptr<INode>)>) const;
+
+            static bool is_directory(INode* obj) {
+                return (dynamic_cast<Directory*>(obj) != nullptr);
+            }
+
+            static bool is_directory(std::shared_ptr<INode> obj) {
+                return (std::dynamic_pointer_cast<Directory>(obj) != nullptr);
+            }
 
         private:
             class Entries: public std::map<const std::string, std::shared_ptr<INode> > {
