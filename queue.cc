@@ -142,6 +142,7 @@ void Queue::queue_signal(const char* data, const size_t data_size)
 }
 
 
+
 const signal_count_t Queue::signal_available(const Subscriber& sub) const
 {
     SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "signal_available(): Called");

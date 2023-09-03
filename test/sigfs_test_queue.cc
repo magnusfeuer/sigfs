@@ -201,7 +201,7 @@ void check_signal_sequence(const char* test_id,
         //
         // Do multiple callbacks.
         //
-        sub.queue().dequeue_signal<void*>(sub, (void*) 0, cb);
+        sub.queue()->dequeue_signal<void*>(sub, (void*) 0, cb);
 
     }
 
@@ -210,7 +210,7 @@ void check_signal_sequence(const char* test_id,
 
 
 
-void validate_signal(sigfs::Queue& queue,
+void validate_signal(std::shared_ptr<sigfs::Queue> queue,
                      int sub_count,
                      const char* test_id,
                      const char* data,
@@ -222,13 +222,13 @@ void validate_signal(sigfs::Queue& queue,
         threads[ind] = std::make_unique<std::thread> (
             [test_id, data, &queue, lost_signals]() {
                 sigfs::Subscriber sub(queue);
-                check_signal(queue, test_id, sub, data, strlen(data) + 1, lost_signals);
+                check_signal(*queue, test_id, sub, data, strlen(data) + 1, lost_signals);
             });
 
     // Wait for thread to fire up.
     // Non-dermenistic, but this is not a problem here.
     usleep(10000);
-    queue.queue_signal(data, strlen(data)+1);
+    queue->queue_signal(data, strlen(data)+1);
 
     for (int ind=0; ind < sub_count; ++ind)
         threads[ind]->join();
@@ -333,16 +333,16 @@ int main(int argc,  char *const* argv)
         // One signal published. One signal read
         //
 
-        Queue g_queue(4);
+        std::shared_ptr<Queue> g_queue(std::make_shared<Queue>(4));
 
         {
             SIGFS_LOG_DEBUG("START: 1.0");
             Subscriber sub(g_queue);
-            g_queue.queue_signal("SIG001", 7);
+            g_queue->queue_signal("SIG001", 7);
 
-            assert(g_queue.signal_available(sub));
-            check_signal(g_queue, "1.0.1", sub, "SIG001", 7, 0);
-            assert(!g_queue.signal_available(sub));
+            assert(g_queue->signal_available(sub));
+            check_signal(*g_queue, "1.0.1", sub, "SIG001", 7, 0);
+            assert(!g_queue->signal_available(sub));
 
             SIGFS_LOG_INFO("PASS: 1.0");
         }
@@ -356,24 +356,24 @@ int main(int argc,  char *const* argv)
             Subscriber sub1(g_queue);
             Subscriber sub2(g_queue);
 
-            g_queue.queue_signal("SIG001", 7);
-            g_queue.queue_signal("SIG002", 7);
+            g_queue->queue_signal("SIG001", 7);
+            g_queue->queue_signal("SIG002", 7);
 
-            assert(g_queue.signal_available(sub1));
-            check_signal(g_queue, "1.1.1", sub1, "SIG001", 7, 0);
+            assert(g_queue->signal_available(sub1));
+            check_signal(*g_queue, "1.1.1", sub1, "SIG001", 7, 0);
 
-            assert(g_queue.signal_available(sub1));
-            check_signal(g_queue, "1.1.2", sub1, "SIG002", 7, 0);
+            assert(g_queue->signal_available(sub1));
+            check_signal(*g_queue, "1.1.2", sub1, "SIG002", 7, 0);
 
-            assert(!g_queue.signal_available(sub1));
+            assert(!g_queue->signal_available(sub1));
 
-            assert(g_queue.signal_available(sub2));
-            check_signal(g_queue, "1.1.1", sub2, "SIG001", 7, 0);
+            assert(g_queue->signal_available(sub2));
+            check_signal(*g_queue, "1.1.1", sub2, "SIG001", 7, 0);
 
-            assert(g_queue.signal_available(sub2));
-            check_signal(g_queue, "1.1.2", sub2, "SIG002", 7, 0);
+            assert(g_queue->signal_available(sub2));
+            check_signal(*g_queue, "1.1.2", sub2, "SIG002", 7, 0);
 
-            assert(!g_queue.signal_available(sub2));
+            assert(!g_queue->signal_available(sub2));
             SIGFS_LOG_INFO("PASS: 1.1");
 
 
@@ -383,16 +383,16 @@ int main(int argc,  char *const* argv)
             SIGFS_LOG_DEBUG("START: 1.2");
 
             // Add two additional signals and make sure that we can read them.
-            g_queue.queue_signal("SIG003", 7);
-            g_queue.queue_signal("SIG004", 7);
+            g_queue->queue_signal("SIG003", 7);
+            g_queue->queue_signal("SIG004", 7);
 
-            assert(g_queue.signal_available(sub1));
-            check_signal(g_queue, "1.2.1", sub1, "SIG003", 7, 0);
+            assert(g_queue->signal_available(sub1));
+            check_signal(*g_queue, "1.2.1", sub1, "SIG003", 7, 0);
 
-            assert(g_queue.signal_available(sub1));
-            check_signal(g_queue, "1.2.2", sub1, "SIG004", 7, 0);
+            assert(g_queue->signal_available(sub1));
+            check_signal(*g_queue, "1.2.2", sub1, "SIG004", 7, 0);
 
-            assert(!g_queue.signal_available(sub1));
+            assert(!g_queue->signal_available(sub1));
 
             SIGFS_LOG_DEBUG("PASS: 1.2");
         }
@@ -403,20 +403,20 @@ int main(int argc,  char *const* argv)
             //
             SIGFS_LOG_DEBUG("START: 1.3");
             Subscriber sub(g_queue);
-            g_queue.queue_signal("SIG005", 7);
-            g_queue.queue_signal("SIG006", 7);
-            g_queue.queue_signal("SIG007", 7);
-            g_queue.queue_signal("SIG008", 7);
-            g_queue.queue_signal("SIG009", 7);
-            g_queue.queue_signal("SIG010", 7);
+            g_queue->queue_signal("SIG005", 7);
+            g_queue->queue_signal("SIG006", 7);
+            g_queue->queue_signal("SIG007", 7);
+            g_queue->queue_signal("SIG008", 7);
+            g_queue->queue_signal("SIG009", 7);
+            g_queue->queue_signal("SIG010", 7);
             // Only the last three signals will be available.
 
-            check_signal(g_queue, "1.3.1", sub, "SIG008", 7, 3);
-            assert(g_queue.signal_available(sub));
-            check_signal(g_queue, "1.3.2", sub, "SIG009", 7, 0);
-            assert(g_queue.signal_available(sub));
-            check_signal(g_queue, "1.3.3", sub, "SIG010", 7, 0);
-            assert(!g_queue.signal_available(sub));
+            check_signal(*g_queue, "1.3.1", sub, "SIG008", 7, 3);
+            assert(g_queue->signal_available(sub));
+            check_signal(*g_queue, "1.3.2", sub, "SIG009", 7, 0);
+            assert(g_queue->signal_available(sub));
+            check_signal(*g_queue, "1.3.3", sub, "SIG010", 7, 0);
+            assert(!g_queue->signal_available(sub));
             SIGFS_LOG_INFO("PASS: 1.3");
         }
         {
@@ -426,22 +426,22 @@ int main(int argc,  char *const* argv)
             SIGFS_LOG_DEBUG("START: 1.4");
             Subscriber sub1(g_queue);
             Subscriber sub2(g_queue);
-            g_queue.queue_signal("SIG011", 7);
-            g_queue.queue_signal("SIG012", 7);
-            g_queue.queue_signal("SIG013", 7);
-            g_queue.queue_signal("SIG014", 7);
-            g_queue.queue_signal("SIG015", 7);
-            g_queue.queue_signal("SIG016", 7);
-            g_queue.queue_signal("SIG017", 7);
+            g_queue->queue_signal("SIG011", 7);
+            g_queue->queue_signal("SIG012", 7);
+            g_queue->queue_signal("SIG013", 7);
+            g_queue->queue_signal("SIG014", 7);
+            g_queue->queue_signal("SIG015", 7);
+            g_queue->queue_signal("SIG016", 7);
+            g_queue->queue_signal("SIG017", 7);
 
             // Check that we have the last three signals available.
-            assert(g_queue.signal_available(sub1));
-            check_signal(g_queue, "1.4.1", sub1, "SIG015", 7, 4);
-            assert(g_queue.signal_available(sub1));
-            check_signal(g_queue, "1.4.2", sub1, "SIG016", 7, 0);
-            assert(g_queue.signal_available(sub1));
-            check_signal(g_queue, "1.4.3", sub1, "SIG017", 7, 0);
-            assert(!g_queue.signal_available(sub1));
+            assert(g_queue->signal_available(sub1));
+            check_signal(*g_queue, "1.4.1", sub1, "SIG015", 7, 4);
+            assert(g_queue->signal_available(sub1));
+            check_signal(*g_queue, "1.4.2", sub1, "SIG016", 7, 0);
+            assert(g_queue->signal_available(sub1));
+            check_signal(*g_queue, "1.4.3", sub1, "SIG017", 7, 0);
+            assert(!g_queue->signal_available(sub1));
             SIGFS_LOG_INFO("PASS: 1.4");
 
 
@@ -451,12 +451,12 @@ int main(int argc,  char *const* argv)
             //  catch up even further after adding to more signals.
             //
             SIGFS_LOG_DEBUG("START: 1.5");
-            g_queue.queue_signal("SIG018", 7);
-            g_queue.queue_signal("SIG019", 7);
+            g_queue->queue_signal("SIG018", 7);
+            g_queue->queue_signal("SIG019", 7);
 
-            check_signal(g_queue, "1.5.1", sub2, "SIG017", 7, 6);
-            check_signal(g_queue, "1.5.2", sub2, "SIG018", 7, 0);
-            check_signal(g_queue, "1.5.3", sub2, "SIG019", 7, 0);
+            check_signal(*g_queue, "1.5.1", sub2, "SIG017", 7, 6);
+            check_signal(*g_queue, "1.5.2", sub2, "SIG018", 7, 0);
+            check_signal(*g_queue, "1.5.3", sub2, "SIG019", 7, 0);
             SIGFS_LOG_INFO("PASS: 1.5");
         }
     }
@@ -480,20 +480,20 @@ int main(int argc,  char *const* argv)
         // Make queue length fairly small to ensure wrapping.
         //
         SIGFS_LOG_DEBUG("START: 2.0");
-        Queue g_queue(2048);
+        std::shared_ptr<Queue> g_queue(std::make_shared<Queue>(2048));
 
         Subscriber sub1(g_queue);
         // // Create publisher thread A
         std::thread pub_thr_a (
             [&g_queue]() {
-                publish_signal_sequence("2.0.1", g_queue, 1, 1200);
+                publish_signal_sequence("2.0.1", *g_queue, 1, 1200);
             });
 
 
         // Create publisher thread B
         std::thread pub_thr_b (
             [&g_queue]() {
-                publish_signal_sequence("2.0.2", g_queue, 2, 1200);
+                publish_signal_sequence("2.0.2", *g_queue, 2, 1200);
             });
 
 
@@ -505,7 +505,7 @@ int main(int argc,  char *const* argv)
         check_signal_sequence("2.0.3", sub1, prefixes, 2, 2400);
 
         // Check that we got all signals and no more are ready to be read
-        assert(!g_queue.signal_available(sub1));
+        assert(!g_queue->signal_available(sub1));
 
         // Join threads.
         pub_thr_a.join();
@@ -520,7 +520,7 @@ int main(int argc,  char *const* argv)
     // then pump two separate sequence of signals as fast as they can.
     // Have a single subscriber check for signal consistency
     {
-        Queue g_queue(131072);
+        std::shared_ptr<Queue> g_queue(std::make_shared<Queue>(131072));
         Subscriber sub1(g_queue);
         Subscriber sub2(g_queue);
         const int prefixes[]= { 1,2 };
@@ -540,14 +540,14 @@ int main(int argc,  char *const* argv)
         // Create publisher thread a
         std::thread pub_thr_a (
             [&g_queue]() {
-                publish_signal_sequence("2.1.1", g_queue, 1, 100000);
+                publish_signal_sequence("2.1.1", *g_queue, 1, 100000);
             });
 
 
         // Create publisher thread b
         std::thread pub_thr_b (
             [&g_queue]() {
-                publish_signal_sequence("2.1.2", g_queue, 2, 100000);
+                publish_signal_sequence("2.1.2", *g_queue, 2, 100000);
             });
 
 

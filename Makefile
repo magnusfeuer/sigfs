@@ -16,7 +16,7 @@ SIGFS_SRC=fs_filesys.cc fs_dir.cc fs_file.cc fs_inode.cc sigfs.cc log.cc queue.c
 SIGFS_OBJ=${patsubst %.cc, %.o, ${SIGFS_SRC}}
 SIGFS=sigfs
 
-SIGFS_TEST_SRC=fs_test.cc fs_filesys.cc fs_inode.cc fs_dir.cc fs_file.cc fs_access.cc log.cc
+SIGFS_TEST_SRC=fs_test.cc fs_filesys.cc fs_inode.cc fs_dir.cc fs_file.cc fs_access.cc log.cc queue.cc
 SIGFS_TEST_OBJ=${patsubst %.cc, %.o, ${SIGFS_TEST_SRC}}
 SIGFS_TEST=sigfs_test
 

@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <iostream>
 #include <variant>
+#include "queue.hh"
 
 using json=nlohmann::json;
 namespace sigfs {
@@ -164,7 +165,10 @@ namespace sigfs {
                 return (std::dynamic_pointer_cast<File>(obj) != nullptr);
             }
 
+            static constexpr uint32_t DEFAULT_QUEUE_LENGTH = 16777216; // 16 MB.
         private:
+            const Queue::index_t queue_length_;
+            std::shared_ptr<Queue> queue_;
         };
 
 

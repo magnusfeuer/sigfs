@@ -22,18 +22,18 @@
 #include <fcntl.h>
 #include <iostream>
 #include "log.h"
-#include "queue_impl.hh"
 #include "subscriber.hh"
 #include <limits.h>
 #include <getopt.h>
 #include <fstream>
 #include "fs.hh"
+#include "queue_impl.hh"
 
 using namespace sigfs;
 
 
 // Globals for the win
-Queue* g_queue(0);
+std::shared_ptr<Queue> g_queue(nullptr);
 std::shared_ptr<FileSystem> g_fsys;
 
 
@@ -368,7 +368,7 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
         return;
     }
 
-    Subscriber *sub = new Subscriber(*g_queue);
+    Subscriber *sub = new Subscriber(g_queue);
     fi->fh = (uint64_t) sub; // It works. Stop whining.
     fi->direct_io=1;
     fi->nonseekable=1;
@@ -393,6 +393,9 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
                     off_t offset, struct fuse_file_info *fi)
 {
 
+    // It works. Stop whining.
+    Subscriber* sub{(Subscriber*) fi->fh};
+
 
     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(%lu): Called. Size[%lu]. offset[%ld]", ino, size, offset);
 
@@ -401,9 +404,6 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
         fuse_reply_err(req, EPERM);
         return;
     }
-
-    // It works. Stop whining.
-    Subscriber* sub{(Subscriber*) fi->fh};
 
     // if (offset != 0) {
     //     SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "do_read(): Offset %lu not implemented.", offset);
@@ -706,7 +706,7 @@ int main(int argc, char **argv)
     struct fuse_loop_config config;
     int ret = -1;
 
-    g_queue = new Queue(32768*512);
+    g_queue = std::make_shared<Queue>(32768*512);
 
     if (fuse_parse_cmdline(&args, &opts) != 0) {
         puts("No mopre");

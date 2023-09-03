@@ -12,8 +12,18 @@
 using namespace sigfs;
 
 FileSystem::File::File(FileSystem& owner, const ino_t parent_inode, const json& config):
-    INode(owner, parent_inode, config)
+    INode(owner, parent_inode, config),
+    queue_length_(config.value("queue_length", FileSystem::File::DEFAULT_QUEUE_LENGTH)),
+    queue_(nullptr)
 {
 }
+
+// void FileSystem::File::InitializeQueue(void)
+// {
+//     if (queue_ != nullptr)
+//         return;
+
+//     queue_ = std::make_shared<Queue>(queue_length);
+// }
 
 
