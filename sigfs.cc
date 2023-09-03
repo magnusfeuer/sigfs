@@ -33,7 +33,6 @@ using namespace sigfs;
 
 
 // Globals for the win
-std::shared_ptr<Queue> g_queue(nullptr);
 std::shared_ptr<FileSystem> g_fsys;
 
 
@@ -324,7 +323,7 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
 
     // g_fsys->lookup_inode() will termiante program if inode not found.
     // If we have a null pointer here, it is because dymaic cast is failing due to
-    // the fact that we are trying to read the directory entries of a file
+    // the fact that we are trying to open a directory.
     //
     if (!FileSystem::File::is_file(file_entry)) {
         SIGFS_LOG_DEBUG("do_open(file_inode: %lu): Inode is not a file.\n", file_inode);
@@ -341,13 +340,11 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
 
     file_entry->get_access(ctx->uid, ctx->gid, can_read, can_write);
 
-    (void) fi;
-
     //
-    // Make sure we are not opening for both read and writ
+    // Make sure we are not opening for both read and write
     //
     if (fi->flags & O_RDWR) {
-        SIGFS_LOG_DEBUG( "do_open(file_inode: %lu): %s: Tried to open for read and write. Access denied" , file_inode, file_entry->name().c_str());
+        SIGFS_LOG_INFO( "do_open(file_inode: %lu): %s: Tried to open for read and write. Access denied" , file_inode, file_entry->name().c_str());
         fuse_reply_err(req, EACCES);
         return;
     }
@@ -361,14 +358,22 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
         return;
     }
 
+    //
     // Are we allowed to open for writing?
+    //
     if ((fi->flags & O_WRONLY) && !can_write) {
         SIGFS_LOG_DEBUG( "do_open(file_inode: %lu): %s: Tried to open for write with no permission. Access denied" , file_inode, file_entry->name().c_str());
         fuse_reply_err(req, EACCES);
         return;
     }
 
-    Subscriber *sub = new Subscriber(g_queue);
+    // Create a new subscriber that is connected to the single queue
+    // for the given file entry.
+    //
+    // dynamic_pointer_cast<>() will always work since we verified that the entry is a file at the
+    // beginning of this function.
+    //
+    Subscriber *sub = new Subscriber(std::dynamic_pointer_cast<FileSystem::File>(file_entry)->queue());
     fi->fh = (uint64_t) sub; // It works. Stop whining.
     fi->direct_io=1;
     fi->nonseekable=1;
@@ -389,21 +394,16 @@ static void read_interrupt(fuse_req_t req, void *data)
 }
 
 
-static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
+static void do_read(fuse_req_t req, fuse_ino_t file_inode, size_t size,
                     off_t offset, struct fuse_file_info *fi)
 {
 
     // It works. Stop whining.
     Subscriber* sub{(Subscriber*) fi->fh};
 
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(%lu): Called. Size[%lu]. offset[%ld]", file_inode, size, offset);
 
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(%lu): Called. Size[%lu]. offset[%ld]", ino, size, offset);
 
-    if (ino != 2) {
-        SIGFS_LOG_INDEX_WARNING(sub->sub_id(),"do_read(%lu): Only inode 2 can be read from", ino);
-        fuse_reply_err(req, EPERM);
-        return;
-    }
 
     // if (offset != 0) {
     //     SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "do_read(): Offset %lu not implemented.", offset);
@@ -491,7 +491,7 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
     fuse_req_interrupt_func(req, read_interrupt, (void*) sub);
 
     // If we are interrupted, don't send back anything
-    if (!g_queue->dequeue_signal<fuse_req_t>(*sub, req, cb)) {
+    if (!sub->queue()->dequeue_signal<fuse_req_t>(*sub, req, cb)) {
         // Only nil the interrupt function if we were not interrupted.
         // If we were interrupted, this will be done by the lambda
         // function above.
@@ -499,6 +499,7 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
         check_fuse_call(sub->sub_id(),
                         fuse_reply_err(req, EINTR),
                         "do_read(): Interrupt: fuse_reply_err(req, EINTR) returned: ");
+
 
         return;
     }
@@ -551,20 +552,9 @@ static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
                      size_t size, off_t offset, struct fuse_file_info *fi)
 {
     int index = SIGFS_NIL_INDEX;
-#ifdef SIGFS_LOG
     Subscriber* sub((Subscriber*) fi->fh);
-    index = sub->sub_id();
-    SIGFS_LOG_INDEX_DEBUG(index, "do_write(%lu): Called, offset[%lu] size[%lu]", ino, offset, size);
-#endif
 
-    if (ino != 2) {
-        SIGFS_LOG_INDEX_WARNING(sub->sub_id(),"do_write(%lu): Only inode 2 can be written to", ino);
-        check_fuse_call(index,
-                        fuse_reply_err(req, EPERM),
-                        "do_write(%lu): fuse_reply_err(EPERM) returned: ", ino);
-
-        return;
-    }
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(%lu): Called, offset[%lu] size[%lu]", ino, offset, size);
 
 
     // Traverse the buffer to check for integrity
@@ -612,7 +602,7 @@ static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
         //
         // Queue signal.
         //
-        g_queue->queue_signal(payload->payload, payload->payload_size);
+        sub->queue()->queue_signal(payload->payload, payload->payload_size);
         SIGFS_LOG_INDEX_DEBUG(index, "do_write(%lu): Queued %d payload bytes", ino,payload->payload_size);
         remaining_bytes -= SIGFS_PAYLOAD_SIZE(payload);
         buffer += SIGFS_PAYLOAD_SIZE(payload);
@@ -714,7 +704,6 @@ int main(int argc, char **argv)
     struct fuse_loop_config config;
     int ret = -1;
 
-    g_queue = std::make_shared<Queue>(32768*512);
 
     if (fuse_parse_cmdline(&args, &opts) != 0) {
         puts("No mopre");

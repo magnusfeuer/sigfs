@@ -157,6 +157,9 @@ namespace sigfs {
         class File: public INode {
         public:
             File(FileSystem& owner, const ino_t parent_inode, const json& config);
+
+            std::shared_ptr<Queue> queue(void);
+
             static bool is_file(INode* obj) {
                 return (dynamic_cast<File*>(obj) != nullptr);
             }

@@ -8,7 +8,7 @@
 
 
 #include "fs.hh"
-
+#include "log.h"
 using namespace sigfs;
 
 FileSystem::File::File(FileSystem& owner, const ino_t parent_inode, const json& config):
@@ -18,12 +18,17 @@ FileSystem::File::File(FileSystem& owner, const ino_t parent_inode, const json& 
 {
 }
 
-// void FileSystem::File::InitializeQueue(void)
-// {
-//     if (queue_ != nullptr)
-//         return;
+std::shared_ptr<Queue> FileSystem::File::queue(void)
+{
+    if (queue_ == nullptr) {
+        queue_ = std::make_shared<Queue>(queue_length_);
+        if (queue_ == nullptr) {
+            SIGFS_LOG_FATAL("FileSystem::File::queue(): Could not create queue with lenght %u", queue_length_);
+            abort();
+        }
+    }
+    return queue_;
+}
 
-//     queue_ = std::make_shared<Queue>(queue_length);
-// }
 
 
