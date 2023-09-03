@@ -437,11 +437,6 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
                 SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Interrupted!");
                 fuse_req_interrupt_func(req, 0, 0);
 
-		check_fuse_call(sub->sub_id(),
-                                fuse_reply_err(req, EINTR),
-                                "do_read(): Interrupt: fuse_reply_err(req, EINTR) returned: ");
-
-
                 sub->set_interrupted(false);
                 return Queue::cb_result_t::not_processed;
             }
@@ -494,7 +489,20 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
         };
 
     fuse_req_interrupt_func(req, read_interrupt, (void*) sub);
-    g_queue->dequeue_signal<fuse_req_t>(*sub, req, cb);
+
+    // If we are interrupted, don't send back anything
+    if (!g_queue->dequeue_signal<fuse_req_t>(*sub, req, cb)) {
+        // Only nil the interrupt function if we were not interrupted.
+        // If we were interrupted, this will be done by the lambda
+        // function above.
+
+        check_fuse_call(sub->sub_id(),
+                        fuse_reply_err(req, EINTR),
+                        "do_read(): Interrupt: fuse_reply_err(req, EINTR) returned: ");
+
+        return;
+    }
+    // Nil out the interrupt function.
     fuse_req_interrupt_func(req, 0, 0);
 
     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Sending back %d (of max %d) iov entries. Total length: %lu",
@@ -533,7 +541,7 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
 #endif
     check_fuse_call(sub->sub_id(),
                     fuse_reply_iov(req, iov, iov_ind),
-                    "do_read(): fuse_reply_iov() returned ",
+                    "do_read(): fuse_reply_iov(%d) returned ",
                     iov_ind);
     return;
 }

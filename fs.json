@@ -4,7 +4,7 @@
         "uid_access": [
             {
                 "uid": 1000,
-                "access": [ "read", "inherit" ]
+                "access": [ "read", "write", "inherit" ]
             }
         ],
         "gid_access": [],

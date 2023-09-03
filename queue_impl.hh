@@ -14,7 +14,10 @@
 
 namespace sigfs {
     template<typename CallbackT>
-    void Queue::dequeue_signal(Subscriber& sub,
+
+    // Return true if we were not interrupted.
+    // Returnf alse if we were interrupted.
+    bool Queue::dequeue_signal(Subscriber& sub,
                                CallbackT userdata,
                                signal_callback_t<CallbackT>& cb) const
     {
@@ -98,7 +101,7 @@ namespace sigfs {
             // Were we interrupted?
             if (sub.is_interrupted()) {
                 (void) cb( userdata, 0, 0, 0, 0, 0);
-                return;
+                return false;
             }
 
             //
@@ -180,7 +183,7 @@ namespace sigfs {
           }
           }
         */
-        return;
+        return true; // Not interrupted.
     }
 }
 #endif // __SIGFS_QUEUE__

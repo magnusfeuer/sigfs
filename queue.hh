@@ -103,7 +103,7 @@ namespace sigfs {
         // See below for instructions on how to interrupt this call.
         //
         template<typename CallbackT=void*>
-        void dequeue_signal(Subscriber& sub,
+        bool dequeue_signal(Subscriber& sub,
                             CallbackT userdata,
                             signal_callback_t<CallbackT>& cb) const;
 
