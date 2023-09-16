@@ -3,6 +3,10 @@
         "name": "/",
         "uid_access": [
             {
+                "uid": 0,
+                "access": [ "read", "inherit" ]
+            },
+            {
                 "uid": 1000,
                 "access": [ "read", "write", "inherit" ]
             }

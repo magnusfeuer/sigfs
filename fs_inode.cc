@@ -10,6 +10,7 @@
 #include "fs.hh"
 #include "log.h"
 
+
 using namespace sigfs;
 
 FileSystem::INode::INode(FileSystem& owner,
@@ -19,8 +20,8 @@ FileSystem::INode::INode(FileSystem& owner,
     owner_(owner),
     inode_(owner.get_next_inode()),
     parent_inode_(parent_inode),
-    uid_access_(UIDAccessControlMap(config.value("uid_access", json::array()))),
-    gid_access_(GIDAccessControlMap(config.value("gid_access", json::array()))),
+    uid_access_(AccessControlMap("uid", config.value("uid_access", json::array()))),
+    gid_access_(AccessControlMap("gid", config.value("gid_access", json::array()))),
     parent_entry_(nullptr),
     access_is_cached_(false)
 {
@@ -32,8 +33,8 @@ json FileSystem::INode::to_config(void) const
             { "inode", inode_ },
             { "parent", parent_inode_ },
             { "name", name_ },
-            { "uid_access", uid_access_.to_config() },
-            { "gid_access", gid_access_.to_config() }
+            { "uid_access", uid_access_.to_config("uid") },
+            { "gid_access", gid_access_.to_config("gid") }
         } );
 }
 
@@ -70,7 +71,7 @@ std::shared_ptr<FileSystem::INode> FileSystem::INode::parent_entry(void)
     return parent_entry_;
 }
 
-void FileSystem::INode::import_inherited_access_rights(uid_t uid, gid_t gid)
+void FileSystem::INode::inherit_access_rights(uid_t uid, gid_t gid)
 {
     // Don't do this we are root (i.e. we have no), or if we have
     // already been here before.
@@ -162,7 +163,7 @@ void FileSystem::INode::import_inherited_access_rights(uid_t uid, gid_t gid)
 
         }
 
-        // Waas this the root inode?
+        // Was this the root inode?
         // If so, break out.
         if (parent->inode() == FileSystem::root_inode()) {
             break;
@@ -172,7 +173,7 @@ void FileSystem::INode::import_inherited_access_rights(uid_t uid, gid_t gid)
         parent = parent->parent_entry();
     }
 
-    SIGFS_LOG_DEBUG("import_inherited_access_rights(uid[%u], gid[%u], name[%s]):      Result - uid_read[%c] uid_write[%c] gid_read[%c] gid_write[%c]",
+    SIGFS_LOG_DEBUG("inherit_access_rights(uid[%u], gid[%u], name[%s]):      Result - uid_read[%c] uid_write[%c] gid_read[%c] gid_write[%c]",
                     uid, gid, name().c_str(),
                     ((uid_rights->second.get_read_access())?'Y':'N'),
                     ((uid_rights->second.get_write_access())?'Y':'N'),
@@ -182,45 +183,25 @@ void FileSystem::INode::import_inherited_access_rights(uid_t uid, gid_t gid)
     access_is_cached_ = true;
 }
 
+
 void FileSystem::INode::get_uid_access(uid_t uid,
                                        bool& uid_can_read,
                                        bool& uid_can_write,
-                                       bool& access_is_inherited) const
+                                       bool& uid_access_is_inherited) const
 {
-    auto uid_rights = uid_access_.find(uid);
-
-    if (uid_rights == uid_access_.end()) {
-        uid_can_read = false;
-        uid_can_write = false;
-        access_is_inherited = false;
-        return;
-    }
-
-    uid_can_read = uid_rights->second.get_read_access();
-    uid_can_write = uid_rights->second.get_write_access();
-    access_is_inherited = uid_rights->second.get_inherit_flag();
+    uid_access_.get_access(uid, uid_can_read, uid_can_write, uid_access_is_inherited);
     return;
 }
 
 void FileSystem::INode::get_gid_access(gid_t gid,
                                        bool& gid_can_read,
                                        bool& gid_can_write,
-                                       bool& access_is_inherited) const
+                                       bool& gid_access_is_inherited) const
 {
-    auto gid_rights = gid_access_.find(gid);
-
-    if (gid_rights == gid_access_.end()) {
-        gid_can_read = false;
-        gid_can_write = false;
-        access_is_inherited = false;
-        return;
-    }
-
-    gid_can_read = gid_rights->second.get_read_access();
-    gid_can_write = gid_rights->second.get_write_access();
-    access_is_inherited = gid_rights->second.get_inherit_flag();
+    gid_access_.get_access(gid, gid_can_read, gid_can_write, gid_access_is_inherited);
     return;
 }
+
 
 void FileSystem::INode::get_access(uid_t uid,
                                    gid_t gid,
@@ -237,7 +218,7 @@ void FileSystem::INode::get_access(uid_t uid,
     bool gid_can_write(false);
     bool gid_access_is_inherited(false);
 
-    import_inherited_access_rights(uid, gid);
+    inherit_access_rights(uid, gid);
 
     get_uid_access(uid, uid_can_read, uid_can_write, uid_access_is_inherited);
     get_gid_access(gid, gid_can_read, gid_can_write, gid_access_is_inherited);

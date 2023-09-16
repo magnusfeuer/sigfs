@@ -6,9 +6,8 @@
 // Author: Magnus Feuer (magnus@feuerworks.com)
 //
 
-#ifndef __FSTREE_HH__
-#define __FSTREE_HH__
-#endif
+#ifndef __FS_HH__
+#define __FS_HH__
 #include "sigfs_common.h"
 #include <unistd.h>
 #include <sys/types.h>
@@ -30,6 +29,7 @@ namespace sigfs {
         // Encapslulated types
 
         using ino_t=uint64_t;
+        using id_t=uint32_t; // uid_t and gid_t are both uint32.
 
         // Access specifier.
         // JSON config format:
@@ -52,6 +52,7 @@ namespace sigfs {
         //
         class Access {
         public:
+            Access(void);
             Access(const json & config);
             json to_config(void) const;
 
@@ -87,27 +88,24 @@ namespace sigfs {
         // "access" specifies access profile for the user, See Access
         //          documentation for details.
         //
-        class UIDAccessControlMap: public std::map<uid_t, Access> {
+        class AccessControlMap: public std::map<id_t, Access> {
         public:
-            UIDAccessControlMap(const json & config);
+            AccessControlMap(const char* id_elem_name, const json & config);
+            json to_config(const char* id_elem_name) const;
+            void get_access(id_t id,
+                            bool& can_read,
+                            bool& can_write,
+                            bool& access_is_inherited) const;
 
-            json to_config(void) const;
+            Access default_access_;
         };
 
-        // Access control map for Group IDs
-        // Same as abovem but for user groups.
-        //
-        class GIDAccessControlMap: public std::map<gid_t, Access> {
-        public:
-            GIDAccessControlMap(const json & config);
-            json to_config(void) const;
-        };
 
         //
         // {
         //   name: "vehicle_speed",               // Mandatory name of entry
-        //   "uid_access": ...                    // See UIDAccessControlMap
-        //   "gid_access": ...                    // See GIDAccessControlMap
+        //   "uid_access": ...                    // See AccessControlMap
+        //   "gid_access": ...                    // See AccessControlMap
         //
         class INode {
         public:
@@ -127,25 +125,26 @@ namespace sigfs {
             const FileSystem& owner(void) const;
 
         private:
-            void import_inherited_access_rights(uid_t uid, gid_t gid);
+            void inherit_access_rights(uid_t uid, gid_t gid);
+
             void get_uid_access(uid_t uid,
                                 bool& uid_can_read,
                                 bool& uid_can_write,
-                                bool& access_is_inherited) const;
+                                bool& uid_access_is_inherited) const;
+
 
             void get_gid_access(gid_t gid,
                                 bool& gid_can_read,
                                 bool& gid_can_write,
-                                bool& access_is_inherited) const;
-
+                                bool& gid_access_is_inherited) const;
 
         private:
             const std::string name_;
             const FileSystem& owner_;
             const ino_t inode_;
             const ino_t parent_inode_;
-            UIDAccessControlMap uid_access_;
-            GIDAccessControlMap gid_access_;
+            AccessControlMap uid_access_;
+            AccessControlMap gid_access_;
             std::shared_ptr<INode> parent_entry_;
             bool access_is_cached_;
         };
@@ -227,3 +226,4 @@ namespace sigfs {
         std::shared_ptr<Directory> root_;
     };
 }
+#endif // __FS_HH__

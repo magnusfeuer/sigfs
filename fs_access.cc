@@ -10,11 +10,18 @@
 #include "fs.hh"
 #include "log.h"
 
+
+
 using namespace sigfs;
-FileSystem::Access::Access(const json & config):
+
+FileSystem::Access::Access():
     read_access_(false),
     write_access_(false),
     inherit_flag_(false)
+{}
+
+FileSystem::Access::Access(const json & config):
+    Access()
 {
     for(auto iter: config) {
         if (iter == "read") {
@@ -80,46 +87,64 @@ bool FileSystem::Access::get_inherit_flag(void) const
     return inherit_flag_;
 }
 
-FileSystem::UIDAccessControlMap::UIDAccessControlMap(const json & config)
+
+FileSystem::AccessControlMap::AccessControlMap(const char* id_elem_name, const json & config)
 {
     for(auto elem: config) {
-        insert(std::pair<uid_t, Access>(elem["uid"], elem["access"]));
+        auto id_elem(elem[id_elem_name]);
+
+        if (id_elem != 0) {
+            insert(std::pair<id_t, Access>(elem[id_elem_name], elem["access"]));
+        }
+        else {
+            default_access_ = Access(elem["access"]);
+            SIGFS_LOG_DEBUG("********************Default access set to: %s", default_access_.to_config().dump(4).c_str());
+        }
     }
 }
 
-json FileSystem::UIDAccessControlMap::to_config(void) const
+void FileSystem::AccessControlMap::get_access(id_t id,
+                                              bool& can_read,
+                                              bool& can_write,
+                                              bool& access_is_inherited) const
+{
+    auto rights = find(id);
+
+    // If we cannot find a specific access for "id", then
+    // fall back to default access.
+    // Default access will be none for read, write, and inherited if no default
+    // access has been specified using id == 0.
+    //
+    if (rights == end()) {
+        can_read = default_access_.get_read_access();
+        can_write = default_access_.get_write_access();
+        access_is_inherited = default_access_.get_write_access();
+        return;
+    }
+
+    can_read = rights->second.get_read_access();
+    can_write = rights->second.get_write_access();
+    access_is_inherited = rights->second.get_inherit_flag();
+    return;
+}
+
+json FileSystem::AccessControlMap::to_config(const char* id_elem_name) const
 {
     json lst = json::array();
 
     // There is probably a more elegant way of doing this.
     for(auto elem: *this)
         lst.push_back(json ( {
-                    { "uid", elem.first },
+                    { id_elem_name, elem.first },
                     { "access", elem.second.to_config() }
                 } ) );
 
+    lst.push_back(json ( {
+                { id_elem_name, 0 },
+                { "access", default_access_.to_config() }
+            } ) );
     return lst;
 };
 
 
-FileSystem::GIDAccessControlMap::GIDAccessControlMap(const json & config)
-{
-    for(auto elem: config) {
-        insert(std::pair<gid_t, Access>(elem["gid"], elem["access"]));
-    }
-}
-
-json FileSystem::GIDAccessControlMap::to_config(void) const
-{
-    json lst = json::array();
-
-    // There is probably a more elegant way of doing this.
-    for(auto elem: *this) {
-        lst.push_back(json ( {
-                    { "gid", elem.first },
-                    { "access", elem.second.to_config() }
-                } ));;
-
-    }
-    return lst;
-};
+#warning "TEST DEFAULT ACCESS THAT IT WORKS"
