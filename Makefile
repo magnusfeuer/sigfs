@@ -25,7 +25,7 @@ export DESTDIR
 
 
 debug: CXXFLAGS ?=-DSIGFS_LOG -ggdb  ${INCLUDES} -std=c++20 -Wall -pthread # -pg
-CXXFLAGS ?=-O3 ${INCLUDES} -std=c++20 -Wall -pthread 
+CXXFLAGS ?=-O3 -DSIGFS_LOG ${INCLUDES} -std=c++20 -Wall -pthread 
 
 #
 # Build the entire project.

@@ -16,8 +16,8 @@
 #include <sys/types.h>
 #include <time.h>
 #include <string.h>
-#include <stdlib.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <iostream>
@@ -666,39 +666,86 @@ void usage(const char* name)
 
 // Nil functions that we don't want to pollute the source file with
 
-int main(int argc, char **argv)
+int main(int argc, char *argv[])
 {
-    std::string config_file("fs.json");
+    std::string config_file;
     int ch = 0;
     static struct option long_options[] =  {
         {"config", required_argument, NULL, 'c'},
         {NULL, 0, NULL, 0}
     };
 
+    // All options that we do not process directly in main()
+    // will be passed to fuse_parse_cmdline().
+    // We will create a second argc/argv vector for everything
+    // that getopt_long() doesn't parse and pass that vector
+    // to fuse_parse_cmdline()
+    char* fuse_argv[1024];
+    const int fuse_max_argv = int(sizeof(fuse_argv)/sizeof(fuse_argv[0])-1);
+    int fuse_argc=1;
+    fuse_argv[0] = argv[0]; // Program name
+
     //
     // loop over all of the options
     //
+    opterr = 0; // Stop getopt_long() from printing error messages.
     while ((ch = getopt_long(argc, argv, "c:", long_options, NULL)) != -1) {
+        int tmpind = optind -1;
         // check to see if a single character or long option came through
-        switch (ch)
-        {
+        switch (ch) {
         case 'c':
             config_file = optarg;
+            std::cout << "Accepting ["<<argv[tmpind]<<"]" << std::endl;
             break;
 
-        default:
+        case '?': {
+            if (fuse_argc == fuse_max_argv) {
+                std::cerr << "Too many arguments. Max number " << fuse_argc-1 << std::endl;
+                exit(255);
+            }
+            fuse_argv[fuse_argc++] = argv[tmpind];
+
+            std::cout << "Moving ["<<argv[tmpind]<<"] to secondary vector" << std::endl;
             break;
+        }
+        default:
+            std::cout << "Default ["<<argv[tmpind]<<"] triggered [" <<char(ch)<< "]" <<std::endl;
         }
     }
 
+    //
+    // Copy remainder of argv over to fuse_argv;
+    //
+
+    while(argv[optind]) {
+        if (fuse_argc == fuse_max_argv) {
+            std::cerr << "Too many arguments. Max allowed is " << fuse_max_argv - 1  << std::endl;
+            exit(255);
+        }
+        fuse_argv[fuse_argc] = argv[optind];
+        fuse_argc++;
+        optind++;
+    }
+    fuse_argv[fuse_argc] = 0; // Null terminate
+
+    std::cout << "Secondary vector:" << std::endl;
+    for (int i = 0; i < fuse_argc; ++i) 
+        std::cout << "    fuse_argv[" << i << "] = " << fuse_argv[i] << std::endl;
+
     if (config_file.size() == 0) {
-        std::cout << std::endl << "Missing argument: -c <config.json>" << std::endl << std::endl;
-        usage(argv[0]);
+            std::cerr << "Missing argument: -c <config.json>" << std::endl << std::endl;
+            usage(argv[0]);
         exit(255);
     }
 
-    g_fsys = std::make_shared<FileSystem>(json::parse(std::ifstream(config_file)));
-    struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+
+    auto cfg_stream = std::ifstream(config_file);
+    if (!cfg_stream.is_open()) {
+        std::cerr << config_file << ": " << strerror(errno) << std::endl;
+        exit(1);
+    }
+    g_fsys = std::make_shared<FileSystem>(json::parse(cfg_stream));
+    struct fuse_args args = FUSE_ARGS_INIT(fuse_argc, fuse_argv);
     struct fuse_session *se;
     struct fuse_cmdline_opts opts;
     struct fuse_loop_config config;
@@ -706,8 +753,10 @@ int main(int argc, char **argv)
 
 
     if (fuse_parse_cmdline(&args, &opts) != 0) {
-        puts("No mopre");
-        return 1;
+        usage(argv[0]);
+        std::cout << std::endl << "FUSE options:" << std::endl;
+        fuse_cmdline_help();
+        exit(255);
     }
 
     if (opts.show_help) {

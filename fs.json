@@ -4,11 +4,11 @@
         "uid_access": [
             {
                 "uid": 0,
-                "access": [ "read", "inherit" ]
+                "access": [ "read", "cascade" ]
             },
             {
                 "uid": 1000,
-                "access": [ "read", "write", "inherit" ]
+                "access": [ "read", "write", "cascade" ]
             }
         ],
         "gid_access": [],

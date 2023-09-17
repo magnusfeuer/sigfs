@@ -14,7 +14,6 @@ using namespace sigfs;
 
 FileSystem::FileSystem(const nlohmann::json& config):
     next_inode_nr_(root_inode()), // is what parent is set to for root in for sigfs.cc::do_lookup()
-    inherit_access_rights_(config.value("inherit_access_rights", false)),
     root_(std::make_shared<Directory>(*this, 1, config["root"])) // Initialize root recursively with config data
 {
     register_inode(root_);
@@ -25,7 +24,6 @@ json FileSystem::to_config(void) const
     json res;
 
     res["root"] = root_->to_config();
-    res["inherit_access_rights"] = inherit_access_rights_;
     return res;
 }
 

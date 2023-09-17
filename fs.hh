@@ -34,9 +34,10 @@ namespace sigfs {
         // Access specifier.
         // JSON config format:
         // [
-        //   "read"
-        //   "write"
-        //   "inherited"
+        //   "read",
+        //   "write",
+        //   "cascade",
+        //   "reset"
         // ]
         //
         // Default for all values is false
@@ -47,8 +48,19 @@ namespace sigfs {
         // "write" specified if the given "uid" should be able to
         //         write to a signal file
         //
-        // "inherited" specifies if this access should be inherited by
-        //             subdirectories and their signal files
+        // "cascade" specifies if this specific UID/GID access should
+        //           be cascaded by subdirectories and their signal
+        //           files. The cascading will continue down through
+        //           the file tree until a "reset" directive is
+        //           encountered.
+        //           This specifier is ignored for files
+        //
+        // "reset"   specifies that any cascaded access rights from
+        //           parent directories should be deleted and
+        //           ignored. Any access rights for the given UID/GID
+        //           made in the current directory will nit be
+        //           cascaded unless a new "cascade" specifier is
+        //           provided together with the "reset" specifier.
         //
         class Access {
         public:
@@ -58,16 +70,19 @@ namespace sigfs {
 
             bool get_read_access(void) const;
             bool get_write_access(void) const;
-            bool get_inherit_flag(void) const;
+            bool get_cascade_flag(void) const;
+            bool get_reset_flag(void) const;
 
             void set_read_access(bool can_read);
             void set_write_access(bool can_write);
-            void set_inherit_flag(bool inherit_flag);
+            void set_cascade_flag(bool cascade_flag);
+            void set_reset_flag(bool cascade_flag);
 
         private:
             bool read_access_ = false;
             bool write_access_ = false;
-            bool inherit_flag_ = false;
+            bool cascade_flag_ = false;
+            bool reset_flag_ = false;
         };
 
 
@@ -75,7 +90,7 @@ namespace sigfs {
         // JSON config format:
         //   {
         //     "uid": 1001,
-        //     "access": [ "read", "directory", "write", "inherit" ]
+        //     "access": [ "read", "directory", "write", "cascade" ]
         //   },
         //   {
         //     "uid": 1002, {
@@ -95,9 +110,8 @@ namespace sigfs {
             void get_access(id_t id,
                             bool& can_read,
                             bool& can_write,
-                            bool& access_is_inherited) const;
-
-            Access default_access_;
+                            bool& is_cascaded,
+                            bool& is_reset) const;
         };
 
 
@@ -125,18 +139,20 @@ namespace sigfs {
             const FileSystem& owner(void) const;
 
         private:
-            void inherit_access_rights(uid_t uid, gid_t gid);
+            void pull_cascaded_access_rights(uid_t uid, gid_t gid);
 
             void get_uid_access(uid_t uid,
                                 bool& uid_can_read,
                                 bool& uid_can_write,
-                                bool& uid_access_is_inherited) const;
+                                bool& uid_access_is_cascadeed,
+                                bool& uid_access_is_reset) const;
 
 
             void get_gid_access(gid_t gid,
                                 bool& gid_can_read,
                                 bool& gid_can_write,
-                                bool& gid_access_is_inherited) const;
+                                bool& gid_access_is_cascadeed,
+                                bool& gid_access_is_reset) const;
 
         private:
             const std::string name_;
@@ -213,16 +229,9 @@ namespace sigfs {
     private:
         static constexpr int ROOT_INODE = 1;
 
-        enum DefaultAccess {
-            DefaultNoAccess = 0,
-            DefaultWriteAccess,
-            DefaultReadAccess,
-            DefaultReadWriteAccess
-        };
-
         std::map<const ino_t, std::shared_ptr<INode>> inode_entries_;
         mutable ino_t next_inode_nr_ = 1;
-        bool inherit_access_rights_ = false;
+//        bool cascade_access_rights_ = false;
         std::shared_ptr<Directory> root_;
     };
 }

@@ -71,9 +71,10 @@ std::shared_ptr<FileSystem::INode> FileSystem::INode::parent_entry(void)
     return parent_entry_;
 }
 
-void FileSystem::INode::inherit_access_rights(uid_t uid, gid_t gid)
+
+void FileSystem::INode::pull_cascaded_access_rights(uid_t uid, gid_t gid)
 {
-    // Don't do this we are root (i.e. we have no), or if we have
+    // Don't do this we are root (i.e. we have no parent), or if we have
     // already been here before.
     if (inode() == FileSystem::root_inode() || access_is_cached_)
         return;
@@ -90,7 +91,6 @@ void FileSystem::INode::inherit_access_rights(uid_t uid, gid_t gid)
     if (uid_rights == uid_access_.end()) {
         // Insert will always succeed since we know uid does not exist in map
         uid_rights = uid_access_.insert(std::pair(uid, json())).first;
-        //uid_access_.emplace(std::make_pair(uid, FileSystem::Access(json())));
     }
 
     // Do the same thing for our GID
@@ -110,17 +110,18 @@ void FileSystem::INode::inherit_access_rights(uid_t uid, gid_t gid)
         {
             bool uid_can_read(false);
             bool uid_can_write(false);
-            bool uid_access_is_inherited(false);
+            bool uid_is_cascaded(false);
+            bool uid_is_reset(false);
 
             parent->get_uid_access(uid,
                                    uid_can_read,
                                    uid_can_write,
-                                   uid_access_is_inherited);
+                                   uid_is_cascaded,
+                                   uid_is_reset);
 
             // Only update if the (grand-(grand-)(...-))-parent's access map is
             // to be inherited by us.
-
-            if (uid_access_is_inherited) {
+            if (uid_is_cascaded) {
 
                 // If we have an inherited read access, force it through here for the given uid
                 if (uid_can_read) {
@@ -131,7 +132,6 @@ void FileSystem::INode::inherit_access_rights(uid_t uid, gid_t gid)
                 if (uid_can_write) {
                     uid_rights->second.set_write_access(true);
                 }
-
             }
         }
 
@@ -139,16 +139,18 @@ void FileSystem::INode::inherit_access_rights(uid_t uid, gid_t gid)
         {
             bool gid_can_read(false);
             bool gid_can_write(false);
-            bool gid_access_is_inherited(false);
+            bool gid_is_cascaded(false);
+            bool gid_is_reset(false);
 
             parent->get_gid_access(gid,
                                    gid_can_read,
                                    gid_can_write,
-                                   gid_access_is_inherited);
+                                   gid_is_cascaded,
+                                   gid_is_reset);
 
             // Only update if the (grand-(grand-)(...-))-parent's access map is
             // to be inherited by us.
-            if (gid_access_is_inherited) {
+            if (gid_is_cascaded) {
 
                 // If we have an inherited read access, force it through here for the given gid
                 if (gid_can_read) {
@@ -187,18 +189,20 @@ void FileSystem::INode::inherit_access_rights(uid_t uid, gid_t gid)
 void FileSystem::INode::get_uid_access(uid_t uid,
                                        bool& uid_can_read,
                                        bool& uid_can_write,
-                                       bool& uid_access_is_inherited) const
+                                       bool& uid_is_cascaded,
+                                       bool& uid_is_reset) const
 {
-    uid_access_.get_access(uid, uid_can_read, uid_can_write, uid_access_is_inherited);
+    uid_access_.get_access(uid, uid_can_read, uid_can_write, uid_is_cascaded, uid_is_reset);
     return;
 }
 
 void FileSystem::INode::get_gid_access(gid_t gid,
                                        bool& gid_can_read,
                                        bool& gid_can_write,
-                                       bool& gid_access_is_inherited) const
+                                       bool& gid_is_cascaded,
+                                       bool& gid_is_reset) const
 {
-    gid_access_.get_access(gid, gid_can_read, gid_can_write, gid_access_is_inherited);
+    gid_access_.get_access(gid, gid_can_read, gid_can_write, gid_is_cascaded, gid_is_reset);
     return;
 }
 
@@ -212,16 +216,18 @@ void FileSystem::INode::get_access(uid_t uid,
 {
     bool uid_can_read(false);
     bool uid_can_write(false);
-    bool uid_access_is_inherited(false);
+    bool uid_is_cascaded(false);
+    bool uid_is_reset(false);
 
     bool gid_can_read(false);
     bool gid_can_write(false);
-    bool gid_access_is_inherited(false);
+    bool gid_is_cascaded(false);
+    bool gid_is_reset(false);
 
-    inherit_access_rights(uid, gid);
+    pull_cascaded_access_rights(uid, gid);
 
-    get_uid_access(uid, uid_can_read, uid_can_write, uid_access_is_inherited);
-    get_gid_access(gid, gid_can_read, gid_can_write, gid_access_is_inherited);
+    get_uid_access(uid, uid_can_read, uid_can_write, uid_is_cascaded, uid_is_reset);
+    get_gid_access(gid, gid_can_read, gid_can_write, gid_is_cascaded, gid_is_reset);
 
     can_read = (uid_can_read || gid_can_read);
     can_write = (uid_can_write || gid_can_write);
