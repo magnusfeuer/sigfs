@@ -3,10 +3,6 @@
         "name": "/",
         "uid_access": [
             {
-                "uid": 0,
-                "access": [ "read", "cascade" ]
-            },
-            {
                 "uid": 1000,
                 "access": [ "read", "write", "cascade" ]
             }
@@ -16,6 +12,12 @@
             { "name": "f1" },
             {
                 "name": "s1",
+                "uid_access": [
+                    {
+                        "uid": 1000,
+                        "access": [ "read", "reset", "cascade" ]
+                    }
+                ],
                 "entries": [
                     { "name": "f1" },
                     { "name": "f2" },

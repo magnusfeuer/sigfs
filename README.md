@@ -143,6 +143,13 @@ main design features.
 
 
 
+Please note that the sigfs file system is statically defined by the
+JSON configuration file.
+
+No directories or files can be added, renamed, deleted, or have their
+ownership, timestampts, or permisions changed. Any such operations
+will return `EPERM`.
+
 
 # BUILDING SIGFS
 
@@ -239,13 +246,16 @@ Below is a JSON configuration file example
 
 ## JSON `root` object
 
-The `root` object specifies the full sigfs filesystem structure with directories and files.
-Each directory and file can, optionally, have access rights specified for users and groups.
+The `root` object specifies the full sigfs filesystem structure with
+directories and files.  Each directory and file can, optionally, have
+access rights specified for users and groups.
 
-The `root` object contains a single directory object, described here **FIXME: ADD ANCHOR LINK**, specifying
-the root directory of the sigfs filesystem. 
+The `root` object contains a single directory object, described here
+[JSON directory object](#json-directory-object),
+specifying the root directory of the sigfs filesystem.
 
-The `name` property of the root directory object will be ignorred. **FIXME: TEST IF THIS IS TRUE**
+The `name` property of the root directory object will be
+ignorred. **FIXME: TEST IF THIS IS TRUE**
 
 
 ## JSON directory object
@@ -331,9 +341,11 @@ hosted inside by the directory object.
 
 ## JSON `gid_access` object
 
-The `gid_access` object describes a single group ID's (GID) access rights to a given file or directory object. 
+The `gid_access` object describes a single group ID's (GID) access
+rights to a given file or directory object.
 
-`gid_acccess` objects are always stored as an element in the `gid_access` array property of a file or directory object.
+`gid_acccess` objects are always stored as an element in the
+`gid_access` array property of a file or directory object.
 
 A `gid_access` objects have the following properties:
 

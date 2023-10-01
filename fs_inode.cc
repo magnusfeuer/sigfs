@@ -79,35 +79,37 @@ void FileSystem::INode::pull_cascaded_access_rights(uid_t uid, gid_t gid)
     if (inode() == FileSystem::root_inode() || access_is_cached_)
         return;
 
-    // Parent is always available since we ensured above that we are
-    // not root.
-    auto parent = parent_entry();
-
 
     // Get self's access map for the given uid and gid
     // If we have no entry for the given UID, create it as an empty entry.
-    auto uid_rights = uid_access_.find(uid);
+    auto uid_rights_iter = uid_access_.find(uid);
 
-    if (uid_rights == uid_access_.end()) {
+    if (uid_rights_iter == uid_access_.end()) {
         // Insert will always succeed since we know uid does not exist in map
-        uid_rights = uid_access_.insert(std::pair(uid, json())).first;
+        uid_rights_iter = uid_access_.insert(std::pair(uid, json())).first;
     }
 
     // Do the same thing for our GID
-    auto gid_rights = gid_access_.find(gid);
+    auto gid_rights_iter = gid_access_.find(gid);
 
-    if (gid_rights == gid_access_.end()) {
+    if (gid_rights_iter == gid_access_.end()) {
         // Insert will always succeed since we know gid does not exist in map
-        gid_rights = gid_access_.insert(std::pair(gid, json())).first;
+        gid_rights_iter = gid_access_.insert(std::pair(gid, json())).first;
     }
 
+
     //
-    // Traverse all parents until root is encoutered and add any inherited
-    // access to my local access map
+    // Parent is always available since we ensured above that we are
+    // not root.
     //
-    while(true) {
-        // Paranoid scoping since we are dealing with security here.
-        {
+    {
+        auto parent = parent_entry();
+
+        //
+        // Traverse all parents until root is encoutered and add any inherited
+        // access to my local access map
+        //
+        while(true) {
             bool uid_can_read(false);
             bool uid_can_write(false);
             bool uid_is_cascaded(false);
@@ -125,18 +127,44 @@ void FileSystem::INode::pull_cascaded_access_rights(uid_t uid, gid_t gid)
 
                 // If we have an inherited read access, force it through here for the given uid
                 if (uid_can_read) {
-                    uid_rights->second.set_read_access(true);
+                    uid_rights_iter->second.set_read_access(true);
                 }
 
                 // If we have an inherited write access, force it through here for the given uid
                 if (uid_can_write) {
-                    uid_rights->second.set_write_access(true);
+                    uid_rights_iter->second.set_write_access(true);
                 }
             }
-        }
 
-        // Do the same thing for GID
-        {
+            //
+            // If this access entry has a reset flag, we should not go
+            // higher since the cascaded access rights from parents
+            // further up are to be stopped here.
+            //
+            if (uid_is_reset) {
+                break;
+            }
+
+            // Was this the root inode?
+            // If so, break out.
+            if (parent->inode() == FileSystem::root_inode()) {
+                break;
+            }
+
+            // Step up to grandparent.
+            parent = parent->parent_entry();
+        }
+    }
+
+    // Do the same thing for GID
+    {
+        auto parent = parent_entry();
+
+        //
+        // Traverse all parents until root is encoutered and add any inherited
+        // access to my local access map
+        //
+        while(true) {
             bool gid_can_read(false);
             bool gid_can_write(false);
             bool gid_is_cascaded(false);
@@ -154,33 +182,43 @@ void FileSystem::INode::pull_cascaded_access_rights(uid_t uid, gid_t gid)
 
                 // If we have an inherited read access, force it through here for the given gid
                 if (gid_can_read) {
-                    gid_rights->second.set_read_access(true);
+                    gid_rights_iter->second.set_read_access(true);
                 }
 
                 // If we have an inherited write access, force it through here for the given gid
                 if (gid_can_write) {
-                    gid_rights->second.set_write_access(true);
+                    gid_rights_iter->second.set_write_access(true);
                 }
             }
 
-        }
 
-        // Was this the root inode?
-        // If so, break out.
-        if (parent->inode() == FileSystem::root_inode()) {
-            break;
-        }
+            //
+            // If this access entry has a reset flag, we should not go
+            // higher since the cascaded access rights from parents
+            // further up are to be stopped here.
+            //
+            if (gid_is_reset) {
+                break;
+            }
 
-        // Step up to grandparent.
-        parent = parent->parent_entry();
+
+            // Was this the root inode?
+            // If so, break out.
+            if (parent->inode() == FileSystem::root_inode()) {
+                break;
+            }
+
+            // Step up to grandparent.
+            parent = parent->parent_entry();
+        }
     }
 
     SIGFS_LOG_DEBUG("inherit_access_rights(uid[%u], gid[%u], name[%s]):      Result - uid_read[%c] uid_write[%c] gid_read[%c] gid_write[%c]",
                     uid, gid, name().c_str(),
-                    ((uid_rights->second.get_read_access())?'Y':'N'),
-                    ((uid_rights->second.get_write_access())?'Y':'N'),
-                    ((gid_rights->second.get_read_access())?'Y':'N'),
-                    ((gid_rights->second.get_write_access())?'Y':'N'));
+                    ((uid_rights_iter->second.get_read_access())?'Y':'N'),
+                    ((uid_rights_iter->second.get_write_access())?'Y':'N'),
+                    ((gid_rights_iter->second.get_read_access())?'Y':'N'),
+                    ((gid_rights_iter->second.get_write_access())?'Y':'N'));
 
     access_is_cached_ = true;
 }
