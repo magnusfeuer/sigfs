@@ -32,6 +32,15 @@
 #include "../log.h"
 #include "../sigfs_common.h"
 
+char* prog_name = 0;
+char test_name[256] = {};
+void fail(const char* reason)
+{
+    printf("%s: %s %s. Run debug version of %s with SIGFS_LOG_LEVEL=6 for details.\n", prog_name, test_name, reason, prog_name);
+    printf("%s: %s: sigfs file system test - failed\n", prog_name, test_name);
+    exit(1);
+}
+
 void usage(const char* name)
 {
     printf("Usage: %s (-f file-name | --file-name file-name)\n", name);
@@ -40,11 +49,13 @@ void usage(const char* name)
     puts("        [-P bytes | --payload-size=bytes]");
     puts("        [-c signal-count | --count=signal-count]");
     puts("        [-b batch_size | --batch-size=batch_size]\n");
+    puts("        [-t test_name | --test-name=test-name]\n");
     puts("-p number-of-publishers   How many parallel publisher threads to we start. Default: 1");
     puts("-s number-of-subscribers  How many parallel subscribers threads to we start. Default: 1");
     puts("-P payload-size           Number of bytes to send in each signal. Min: 8. Default: 8");
     puts("-c signal-count           How many signals to each publisher send. Default 1000000");
     puts("-b batch-size             How many signals do each publisher pack into a single write operation. Default: 1");
+    puts("-t test-name              Label to print on test pass or fail. Defaul: \"unnamed test\"");
 }
 
 #ifdef SIGFS_LOG
@@ -70,7 +81,7 @@ void publish_signal_sequence(const char* filename, const int publish_id, int cou
 
     if (fd == -1) {
         SIGFS_LOG_INDEX_FATAL(log_ind, "Could not open file %s: %s", filename, strerror(errno));
-        exit(1);
+        fail("Could not open file");
     }
 
     SIGFS_LOG_INDEX_DEBUG(log_ind, "Called. Publishing %d signals to %s", count, filename);
@@ -117,7 +128,7 @@ void publish_signal_sequence(const char* filename, const int publish_id, int cou
                     SIGFS_LOG_INDEX_DEBUG(log_ind ,"write[%d]    sig_id[%lu]", ind1, *((uint32_t*) ptr));
 
                 if ((ind1 % 8) == 8 && *((uint64_t*) ptr) > 10000000 ) {
-                    SIGFS_LOG_INDEX_FATAL(log_ind, "SUCK IT");
+                    SIGFS_LOG_INDEX_FATAL(log_ind, "SUCK IT"); //??
                     exit(1);
                 }
             }
@@ -128,7 +139,7 @@ void publish_signal_sequence(const char* filename, const int publish_id, int cou
         if (res != tot_size) {
             SIGFS_LOG_INDEX_FATAL(log_ind, "Could not write %lu bytes to file %s. Got %lu bytes written: %s",
                                   tot_size, filename, strerror(errno), res);
-            exit(1);
+            fail("Could not write to file");
         }
 
         SIGFS_LOG_INDEX_DEBUG(log_ind, "Published %d signals [%.3d][%.8d]-[%.3d][%.8d]", ind, publish_id, start_sig_id, publish_id, sig_id-1);
@@ -181,7 +192,7 @@ void check_signal_sequence(const char* filename, int pub_count, int signal_count
     if (fd == -1) {
         SIGFS_LOG_INDEX_FATAL(log_ind, "Could not open file %s: %s",
                               filename, strerror(errno));
-        exit(1);
+        fail("Could not open file");
     }
 
     char dbg[1024];
@@ -194,7 +205,7 @@ void check_signal_sequence(const char* filename, int pub_count, int signal_count
         if (rd_res == -1) {
             SIGFS_LOG_INDEX_FATAL(log_ind, "Could not read from file %s: %s",
                                   filename, strerror(errno));
-            exit(1);
+            fail("Could not read file");
         }
 
 #ifdef SIGFS_LOG
@@ -239,26 +250,27 @@ void check_signal_sequence(const char* filename, int pub_count, int signal_count
             if (bytes_left < (ssize_t) sizeof(sigfs_signal_t)) {
                 SIGFS_LOG_INDEX_FATAL(log_ind, "Need at least %lu bytes for signal header, got %lu",
                                       sizeof(sigfs_signal_t), bytes_left);
-                exit(-1);
+                fail("Could not read signal header");
             }
 
             if (bytes_left < (ssize_t) SIGFS_SIGNAL_SIZE(sig)) {
                 SIGFS_LOG_INDEX_FATAL(log_ind, "Signal header + payload size is %lu, got %d bytes",
                                       bytes_left, sig->payload.payload_size);
-                exit(1);
+                fail("Could not read atomic signal");
             }
 
 
             if (sig->payload.payload_size != payload_size) {
                 SIGFS_LOG_INDEX_FATAL(log_ind, "Wanted payload size of %lu, got %d",
                                       payload_size, sig->payload.payload_size);
-                exit(1);
+                fail("Incorrect payload size");
+
             }
 
             if (sig->lost_signals > 0) {
                 SIGFS_LOG_INDEX_FATAL(log_ind, "Lost %d signals after processing %d signals",
                                       sig->lost_signals, signal_count * pub_count - total_count);
-                exit(1);
+                fail("Lost signals");
             }
 
             //
@@ -268,7 +280,7 @@ void check_signal_sequence(const char* filename, int pub_count, int signal_count
             sig_id = *((int*) (sig->payload.payload + sizeof(int)));
             if (pub_id < 0 || pub_id >= pub_count) {
                 SIGFS_LOG_INDEX_FATAL(log_ind, "Publisher id %d is out of range [0-%d]", pub_id, pub_count - 1);
-                exit(1);
+                fail("Publisher out of range");
             }
 
             SIGFS_LOG_INDEX_DEBUG(log_ind, "SigID[%lu] - pub_id[%.3d] Comparing expected signal ID [%.8d] with received [%.8d]",
@@ -307,9 +319,7 @@ void check_signal_sequence(const char* filename, int pub_count, int signal_count
                     }
                 }
 
-
-
-                exit(1);
+                fail("Signal sequencing failure.");
             }
 
             //
@@ -343,6 +353,7 @@ int main(int argc,  char *const* argv)
         {"subscribers", optional_argument, NULL, 's'},
         {"count", required_argument, NULL, 'c'},
         {"batch-size", optional_argument, NULL, 'b'},
+        {"test-name", optional_argument, NULL, 't'},
         {NULL, 0, NULL, 0}
     };
     int signal_count{1000000};
@@ -351,14 +362,19 @@ int main(int argc,  char *const* argv)
     int batch_size{1};
     char filename[256] = {};
     size_t payload_size{8};
+    prog_name = argv[0];
 
+    strcpy(test_name, "unnamed test");
     // loop over all of the options
-    while ((ch = getopt_long(argc, argv, "p:s:c:f:b:P:", long_options, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "p:s:c:f:b:P:t:", long_options, NULL)) != -1) {
         // check to see if a single character or long option came through
         switch (ch)
         {
         case 'f':
             strcpy(filename, optarg);
+            break;
+        case 't':
+            strcpy(test_name, optarg);
             break;
         case 'p':
             nr_publishers = atoi(optarg);
@@ -427,16 +443,17 @@ int main(int argc,  char *const* argv)
         sub_thr[i]->join();
     }
 
+#ifdef SIGFS_LOG
     auto done = sigfs_usec_since_start();
+#endif
 
-
-    printf("nr-publishers: %d, nr-subscribers: %d, total-signal-count: %d\n",
+    SIGFS_LOG_INFO("nr-publishers: %d, nr-subscribers: %d, total-signal-count: %d\n",
            nr_publishers,
            nr_subscribers,
            signal_count * nr_publishers);
 
-    printf("payload size   usec/signal   signals/sec   mbyte/sec/subscriber   signals received\n");
-    printf("%12lu %13.2f %13.0f %11.3f %18d\n",
+    SIGFS_LOG_INFO("payload size   usec/signal   signals/sec   mbyte/sec/subscriber   signals received\n");
+    SIGFS_LOG_INFO("%12lu %13.2f %13.0f %11.3f %18d\n",
            payload_size,
            (float) done / (float) (signal_count * nr_publishers),
            (float) (signal_count*nr_publishers) / (float) (done / 1000000.0),
@@ -452,5 +469,7 @@ int main(int argc,  char *const* argv)
     //        (float) (signal_count*nr_publishers) / (float) (done / 1000000.0),
     //        (float) done*1000 / (float) (signal_count*nr_publishers));
 
+
+    printf("%s: sigfs filesystem test - passed\n", prog_name);
     exit(0);
 }

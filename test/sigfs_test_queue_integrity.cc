@@ -35,6 +35,15 @@ void usage(const char* name)
     std::cout << "        -s <usec> | --sleep=<usec>" << std::endl;
 }
 
+char* prog_name = 0;
+
+void fail(const char* reason)
+{
+    printf("%s: %s. Run debug version of %s with SIGFS_LOG_LEVEL=6 for details.\n", prog_name, reason, prog_name);
+    printf("%s: Internal queue integrity test - failed\n", prog_name);
+    exit(1);
+}
+
 void check_signal(sigfs::Queue& queue,
                   const char* prefix,
                   sigfs::Subscriber& sub,
@@ -57,25 +66,26 @@ void check_signal(sigfs::Queue& queue,
             if (!payload) {
                 SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Wanted %lu bytes. Got interrupted!", prefix, wanted_res);
                 queue.dump(prefix, sub);
-                exit(1);
+                fail("Unexpected interrupt");
             }
 
             if ((int) payload_size != wanted_res) {
                 SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Wanted %lu bytes. Got %lu bytes", prefix, wanted_res, payload_size);
                 queue.dump(prefix, sub);
-                exit(1);
+                fail("Paylod size mismatch");
             }
 
             if (memcmp(payload, wanted_data, payload_size)) {
                 SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Wanted data [%-*s]. Got [%-*s]", prefix, wanted_res, wanted_data, (int) payload_size, payload);
                 queue.dump(prefix, sub);
-                exit(1);
+                fail("Data payload mismatch");
             }
 
             if ((int) lost_signals != wanted_lost_signals) {
                 SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Wanted lost signals %lu. Got %lu", prefix, wanted_lost_signals, lost_signals);
                 queue.dump(prefix, sub);
-                exit(1);
+                fail("Lost signal count mismatch");
+
             }
             return sigfs::Queue::cb_result_t::processed_dont_call_again;
 
@@ -129,13 +139,13 @@ void check_signal_sequence(const char* test_id,
                 if (payload_size != 2*sizeof(int)) {
                     SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Expected %d bytes, got %d bytes,",
                                           test_id, 2*sizeof(int), payload_size);
-                    exit(0);
+                    fail("Payload size mismatch");
                 }
 
                 // Did we lose signals?
                 if (lost_signals > 0) {
                     SIGFS_LOG_INDEX_FATAL(sub.sub_id(), "%s: Lost %d signals,", test_id, lost_signals);
-                    exit(0);
+                    fail("Unexpected signal loss");
                 }
 
                 // for(std::uint32_t ind = 0; ind < payload_size; ++ind) {
@@ -168,7 +178,7 @@ void check_signal_sequence(const char* test_id,
                                               "%s:   [%.8X]",
                                               test_id, prefix_ids[prefix_ind]);
                     }
-                    exit(1);
+                    fail("Prefix ID mismatch");
                 }
 
                 SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
@@ -187,7 +197,7 @@ void check_signal_sequence(const char* test_id,
                                           *((int*) payload),
                                           *((int*) (payload + sizeof(int))));
 
-                    exit(1);
+                    fail("Signal sequencing mismatch");
                 }
 
                 // Payload good. Increase next expected signal ID for the
@@ -273,6 +283,8 @@ int main(int argc,  char *const* argv)
     int count{1};
     int usec_sleep{0};
     int fd{-1};
+
+    prog_name = argv[0]; // Make available globally
     // loop over all of the options
     fmt_string[0] = 0;
     while ((ch = getopt_long(argc, argv, "d:f:c:s:", long_options, NULL)) != -1) {
@@ -320,9 +332,6 @@ int main(int argc,  char *const* argv)
         sigfs_log_level_set(SIGFS_LOG_LEVEL_INFO);
 
 
-
-    puts("Start");
-    sigfs_log_set_start_time();
 
     //
     // We use a shared g_queu/sub1/sub2 scope for 1.0-1.4 since
@@ -560,8 +569,7 @@ int main(int argc,  char *const* argv)
 
         SIGFS_LOG_INFO("PASS: 2.1");
     }
-    usec_timestamp_t done = sigfs_usec_since_start();
-    printf("Done. Execution time: %ld microseconds\n", done);
+    printf("%s: Test internal queue integrity - passed\n", prog_name);
 
     exit(0);
 }

@@ -695,21 +695,22 @@ int main(int argc, char *argv[])
         switch (ch) {
         case 'c':
             config_file = optarg;
-            std::cout << "Accepting ["<<argv[tmpind]<<"]" << std::endl;
+//            std::cout << "Accepting ["<<argv[tmpind]<<"]" << std::endl;
             break;
 
         case '?': {
             if (fuse_argc == fuse_max_argv) {
-                std::cerr << "Too many arguments. Max number " << fuse_argc-1 << std::endl;
+//                std::cerr << "Too many arguments. Max number " << fuse_argc-1 << std::endl;
                 exit(255);
             }
             fuse_argv[fuse_argc++] = argv[tmpind];
 
-            std::cout << "Moving ["<<argv[tmpind]<<"] to secondary vector" << std::endl;
+//            std::cout << "Moving ["<<argv[tmpind]<<"] to secondary vector" << std::endl;
             break;
         }
         default:
             std::cout << "Default ["<<argv[tmpind]<<"] triggered [" <<char(ch)<< "]" <<std::endl;
+            break;
         }
     }
 
@@ -727,10 +728,6 @@ int main(int argc, char *argv[])
         optind++;
     }
     fuse_argv[fuse_argc] = 0; // Null terminate
-
-    std::cout << "Secondary vector:" << std::endl;
-    for (int i = 0; i < fuse_argc; ++i) 
-        std::cout << "    fuse_argv[" << i << "] = " << fuse_argv[i] << std::endl;
 
     if (config_file.size() == 0) {
             std::cerr << "Missing argument: -c <config.json>" << std::endl << std::endl;
@@ -845,10 +842,8 @@ int main(int argc, char *argv[])
     /* Block until ctrl+c or fusermount -u */
     if (opts.singlethread) {
         ret = fuse_session_loop(se);
-        puts("Single thread");
     }
     else {
-        printf("%d idle threads\n", opts.max_idle_threads);
         config.clone_fd = opts.clone_fd;
         config.max_idle_threads = opts.max_idle_threads;
         ret = fuse_session_loop_mt(se, &config);
