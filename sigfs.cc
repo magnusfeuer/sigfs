@@ -16,24 +16,23 @@
 #include <sys/types.h>
 #include <time.h>
 #include <string.h>
-#include <stdlib.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <iostream>
 #include "log.h"
-#include "queue_impl.hh"
 #include "subscriber.hh"
 #include <limits.h>
 #include <getopt.h>
 #include <fstream>
 #include "fs.hh"
+#include "queue_impl.hh"
 
 using namespace sigfs;
 
 
 // Globals for the win
-Queue* g_queue(0);
 std::shared_ptr<FileSystem> g_fsys;
 
 
@@ -324,7 +323,7 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
 
     // g_fsys->lookup_inode() will termiante program if inode not found.
     // If we have a null pointer here, it is because dymaic cast is failing due to
-    // the fact that we are trying to read the directory entries of a file
+    // the fact that we are trying to open a directory.
     //
     if (!FileSystem::File::is_file(file_entry)) {
         SIGFS_LOG_DEBUG("do_open(file_inode: %lu): Inode is not a file.\n", file_inode);
@@ -341,13 +340,11 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
 
     file_entry->get_access(ctx->uid, ctx->gid, can_read, can_write);
 
-    (void) fi;
-
     //
-    // Make sure we are not opening for both read and writ
+    // Make sure we are not opening for both read and write
     //
     if (fi->flags & O_RDWR) {
-        SIGFS_LOG_DEBUG( "do_open(file_inode: %lu): %s: Tried to open for read and write. Access denied" , file_inode, file_entry->name().c_str());
+        SIGFS_LOG_INFO( "do_open(file_inode: %lu): %s: Tried to open for read and write. Access denied" , file_inode, file_entry->name().c_str());
         fuse_reply_err(req, EACCES);
         return;
     }
@@ -361,14 +358,22 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
         return;
     }
 
+    //
     // Are we allowed to open for writing?
+    //
     if ((fi->flags & O_WRONLY) && !can_write) {
         SIGFS_LOG_DEBUG( "do_open(file_inode: %lu): %s: Tried to open for write with no permission. Access denied" , file_inode, file_entry->name().c_str());
         fuse_reply_err(req, EACCES);
         return;
     }
 
-    Subscriber *sub = new Subscriber(*g_queue);
+    // Create a new subscriber that is connected to the single queue
+    // for the given file entry.
+    //
+    // dynamic_pointer_cast<>() will always work since we verified that the entry is a file at the
+    // beginning of this function.
+    //
+    Subscriber *sub = new Subscriber(std::dynamic_pointer_cast<FileSystem::File>(file_entry)->queue());
     fi->fh = (uint64_t) sub; // It works. Stop whining.
     fi->direct_io=1;
     fi->nonseekable=1;
@@ -389,21 +394,16 @@ static void read_interrupt(fuse_req_t req, void *data)
 }
 
 
-static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
+static void do_read(fuse_req_t req, fuse_ino_t file_inode, size_t size,
                     off_t offset, struct fuse_file_info *fi)
 {
 
-
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(%lu): Called. Size[%lu]. offset[%ld]", ino, size, offset);
-
-    if (ino != 2) {
-        SIGFS_LOG_INDEX_WARNING(sub->sub_id(),"do_read(%lu): Only inode 2 can be read from", ino);
-        fuse_reply_err(req, EPERM);
-        return;
-    }
-
     // It works. Stop whining.
     Subscriber* sub{(Subscriber*) fi->fh};
+
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(%lu): Called. Size[%lu]. offset[%ld]", file_inode, size, offset);
+
+
 
     // if (offset != 0) {
     //     SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "do_read(): Offset %lu not implemented.", offset);
@@ -436,11 +436,6 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
             if (!payload) {
                 SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Interrupted!");
                 fuse_req_interrupt_func(req, 0, 0);
-
-		check_fuse_call(sub->sub_id(),
-                                fuse_reply_err(req, EINTR),
-                                "do_read(): Interrupt: fuse_reply_err(req, EINTR) returned: ");
-
 
                 sub->set_interrupted(false);
                 return Queue::cb_result_t::not_processed;
@@ -494,7 +489,21 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
         };
 
     fuse_req_interrupt_func(req, read_interrupt, (void*) sub);
-    g_queue->dequeue_signal<fuse_req_t>(*sub, req, cb);
+
+    // If we are interrupted, don't send back anything
+    if (!sub->queue()->dequeue_signal<fuse_req_t>(*sub, req, cb)) {
+        // Only nil the interrupt function if we were not interrupted.
+        // If we were interrupted, this will be done by the lambda
+        // function above.
+
+        check_fuse_call(sub->sub_id(),
+                        fuse_reply_err(req, EINTR),
+                        "do_read(): Interrupt: fuse_reply_err(req, EINTR) returned: ");
+
+
+        return;
+    }
+    // Nil out the interrupt function.
     fuse_req_interrupt_func(req, 0, 0);
 
     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Sending back %d (of max %d) iov entries. Total length: %lu",
@@ -533,7 +542,7 @@ static void do_read(fuse_req_t req, fuse_ino_t ino, size_t size,
 #endif
     check_fuse_call(sub->sub_id(),
                     fuse_reply_iov(req, iov, iov_ind),
-                    "do_read(): fuse_reply_iov() returned ",
+                    "do_read(): fuse_reply_iov(%d) returned ",
                     iov_ind);
     return;
 }
@@ -543,20 +552,9 @@ static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
                      size_t size, off_t offset, struct fuse_file_info *fi)
 {
     int index = SIGFS_NIL_INDEX;
-#ifdef SIGFS_LOG
     Subscriber* sub((Subscriber*) fi->fh);
-    index = sub->sub_id();
-    SIGFS_LOG_INDEX_DEBUG(index, "do_write(%lu): Called, offset[%lu] size[%lu]", ino, offset, size);
-#endif
 
-    if (ino != 2) {
-        SIGFS_LOG_INDEX_WARNING(sub->sub_id(),"do_write(%lu): Only inode 2 can be written to", ino);
-        check_fuse_call(index,
-                        fuse_reply_err(req, EPERM),
-                        "do_write(%lu): fuse_reply_err(EPERM) returned: ", ino);
-
-        return;
-    }
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(%lu): Called, offset[%lu] size[%lu]", ino, offset, size);
 
 
     // Traverse the buffer to check for integrity
@@ -604,7 +602,7 @@ static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
         //
         // Queue signal.
         //
-        g_queue->queue_signal(payload->payload, payload->payload_size);
+        sub->queue()->queue_signal(payload->payload, payload->payload_size);
         SIGFS_LOG_INDEX_DEBUG(index, "do_write(%lu): Queued %d payload bytes", ino,payload->payload_size);
         remaining_bytes -= SIGFS_PAYLOAD_SIZE(payload);
         buffer += SIGFS_PAYLOAD_SIZE(payload);
@@ -668,49 +666,94 @@ void usage(const char* name)
 
 // Nil functions that we don't want to pollute the source file with
 
-int main(int argc, char **argv)
+int main(int argc, char *argv[])
 {
-    std::string config_file("fs.json");
+    std::string config_file;
     int ch = 0;
     static struct option long_options[] =  {
         {"config", required_argument, NULL, 'c'},
         {NULL, 0, NULL, 0}
     };
 
+    // All options that we do not process directly in main()
+    // will be passed to fuse_parse_cmdline().
+    // We will create a second argc/argv vector for everything
+    // that getopt_long() doesn't parse and pass that vector
+    // to fuse_parse_cmdline()
+    char* fuse_argv[1024];
+    const int fuse_max_argv = int(sizeof(fuse_argv)/sizeof(fuse_argv[0])-1);
+    int fuse_argc=1;
+    fuse_argv[0] = argv[0]; // Program name
+
     //
     // loop over all of the options
     //
+    opterr = 0; // Stop getopt_long() from printing error messages.
     while ((ch = getopt_long(argc, argv, "c:", long_options, NULL)) != -1) {
+        int tmpind = optind -1;
         // check to see if a single character or long option came through
-        switch (ch)
-        {
+        switch (ch) {
         case 'c':
             config_file = optarg;
+//            std::cout << "Accepting ["<<argv[tmpind]<<"]" << std::endl;
             break;
 
+        case '?': {
+            if (fuse_argc == fuse_max_argv) {
+//                std::cerr << "Too many arguments. Max number " << fuse_argc-1 << std::endl;
+                exit(255);
+            }
+            fuse_argv[fuse_argc++] = argv[tmpind];
+
+//            std::cout << "Moving ["<<argv[tmpind]<<"] to secondary vector" << std::endl;
+            break;
+        }
         default:
+            std::cout << "Default ["<<argv[tmpind]<<"] triggered [" <<char(ch)<< "]" <<std::endl;
             break;
         }
     }
 
+    //
+    // Copy remainder of argv over to fuse_argv;
+    //
+
+    while(argv[optind]) {
+        if (fuse_argc == fuse_max_argv) {
+            std::cerr << "Too many arguments. Max allowed is " << fuse_max_argv - 1  << std::endl;
+            exit(255);
+        }
+        fuse_argv[fuse_argc] = argv[optind];
+        fuse_argc++;
+        optind++;
+    }
+    fuse_argv[fuse_argc] = 0; // Null terminate
+
     if (config_file.size() == 0) {
-        std::cout << std::endl << "Missing argument: -c <config.json>" << std::endl << std::endl;
-        usage(argv[0]);
+            std::cerr << "Missing argument: -c <config.json>" << std::endl << std::endl;
+            usage(argv[0]);
         exit(255);
     }
 
-    g_fsys = std::make_shared<FileSystem>(json::parse(std::ifstream(config_file)));
-    struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+
+    auto cfg_stream = std::ifstream(config_file);
+    if (!cfg_stream.is_open()) {
+        std::cerr << config_file << ": " << strerror(errno) << std::endl;
+        exit(1);
+    }
+    g_fsys = std::make_shared<FileSystem>(json::parse(cfg_stream));
+    struct fuse_args args = FUSE_ARGS_INIT(fuse_argc, fuse_argv);
     struct fuse_session *se;
     struct fuse_cmdline_opts opts;
     struct fuse_loop_config config;
     int ret = -1;
 
-    g_queue = new Queue(32768*512);
 
     if (fuse_parse_cmdline(&args, &opts) != 0) {
-        puts("No mopre");
-        return 1;
+        usage(argv[0]);
+        std::cout << std::endl << "FUSE options:" << std::endl;
+        fuse_cmdline_help();
+        exit(255);
     }
 
     if (opts.show_help) {
@@ -799,10 +842,8 @@ int main(int argc, char **argv)
     /* Block until ctrl+c or fusermount -u */
     if (opts.singlethread) {
         ret = fuse_session_loop(se);
-        puts("Single thread");
     }
     else {
-        printf("%d idle threads\n", opts.max_idle_threads);
         config.clone_fd = opts.clone_fd;
         config.max_idle_threads = opts.max_idle_threads;
         ret = fuse_session_loop_mt(se, &config);

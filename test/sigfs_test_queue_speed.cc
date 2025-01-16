@@ -40,7 +40,7 @@ void usage(const char* name)
 
 
 
-void publish_signal_sequence(sigfs::Queue* queue, const int publish_id, int count)
+void publish_signal_sequence(std::shared_ptr<sigfs::Queue> queue, const int publish_id, int count)
 {
     int sig_id{0};
     char buf[256];
@@ -78,7 +78,7 @@ void publish_signal_sequence(sigfs::Queue* queue, const int publish_id, int coun
 // <prefix_id (4 bytes)><sequence_id (4 bytes)>
 
 //
-void check_signal_sequence(sigfs::Queue* queue,
+void check_signal_sequence(std::shared_ptr<sigfs::Queue> queue,
                            sigfs::Subscriber* sub,
                            const int* prefix_ids,
                            int prefix_count,
@@ -88,7 +88,7 @@ void check_signal_sequence(sigfs::Queue* queue,
     int ind = 0;
 
     sigfs::Queue::signal_callback_t<void*> cb =
-        [&expect_sigid, &count, sub, ind, prefix_count, queue, prefix_ids]
+        [&expect_sigid, &count, sub, ind, prefix_count, prefix_ids]
             (void* userdata,
              signal_id_t signal_id,
              const char* payload,
@@ -224,7 +224,8 @@ int main(int argc,  char *const* argv)
     printf("queue-length: %d, nr-publishers: %d, nr-subscribers: %d, total-nr-signals: %d\n",
            queue_length, nr_publishers, nr_subscribers, signal_count * nr_publishers);
 
-    Queue* g_queue(new Queue(queue_length));
+    std::shared_ptr<Queue> g_queue(std::make_shared<Queue>(queue_length));
+
     Subscriber *subs[nr_subscribers] = {};
     std::thread *sub_thr[nr_subscribers] = {};
     std::thread *pub_thr[nr_publishers] = {};
@@ -238,7 +239,7 @@ int main(int argc,  char *const* argv)
     // Launch a bunch of subscriber threads.
     //
     for (int i=0; i < nr_subscribers; ++i) {
-        subs[i] = new Subscriber(*g_queue);
+        subs[i] = new Subscriber(g_queue);
         sub_thr[i] = new std::thread(check_signal_sequence, g_queue, subs[i], (int*) prefix_ids, nr_publishers, signal_count * nr_publishers);
     }
 
@@ -265,6 +266,5 @@ int main(int argc,  char *const* argv)
            (float) (signal_count*nr_publishers) / (float) (done / 1000000.0),
            (float) done*1000 / (float) (signal_count*nr_publishers));
 
-    delete g_queue;
     exit(0);
 }

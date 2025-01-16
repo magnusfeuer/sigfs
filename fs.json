@@ -4,7 +4,7 @@
         "uid_access": [
             {
                 "uid": 1000,
-                "access": [ "read", "inherit" ]
+                "access": [ "read", "write", "cascade" ]
             }
         ],
         "gid_access": [],
@@ -12,6 +12,12 @@
             { "name": "f1" },
             {
                 "name": "s1",
+                "uid_access": [
+                    {
+                        "uid": 1000,
+                        "access": [ "read", "reset", "cascade" ]
+                    }
+                ],
                 "entries": [
                     { "name": "f1" },
                     { "name": "f2" },

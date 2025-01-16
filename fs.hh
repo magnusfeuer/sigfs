@@ -6,9 +6,8 @@
 // Author: Magnus Feuer (magnus@feuerworks.com)
 //
 
-#ifndef __FSTREE_HH__
-#define __FSTREE_HH__
-#endif
+#ifndef __FS_HH__
+#define __FS_HH__
 #include "sigfs_common.h"
 #include <unistd.h>
 #include <sys/types.h>
@@ -18,6 +17,7 @@
 #include <stdlib.h>
 #include <iostream>
 #include <variant>
+#include "queue.hh"
 
 using json=nlohmann::json;
 namespace sigfs {
@@ -29,13 +29,15 @@ namespace sigfs {
         // Encapslulated types
 
         using ino_t=uint64_t;
+        using id_t=uint32_t; // uid_t and gid_t are both uint32.
 
         // Access specifier.
         // JSON config format:
         // [
-        //   "read"
-        //   "write"
-        //   "inherited"
+        //   "read",
+        //   "write",
+        //   "cascade",
+        //   "reset"
         // ]
         //
         // Default for all values is false
@@ -46,26 +48,41 @@ namespace sigfs {
         // "write" specified if the given "uid" should be able to
         //         write to a signal file
         //
-        // "inherited" specifies if this access should be inherited by
-        //             subdirectories and their signal files
+        // "cascade" specifies if this specific UID/GID access should
+        //           be cascaded by subdirectories and their signal
+        //           files. The cascading will continue down through
+        //           the file tree until a "reset" directive is
+        //           encountered.
+        //           This specifier is ignored for files
+        //
+        // "reset"   specifies that any cascaded access rights from
+        //           parent directories should be deleted and
+        //           ignored. Any access rights for the given UID/GID
+        //           made in the current directory will nit be
+        //           cascaded unless a new "cascade" specifier is
+        //           provided together with the "reset" specifier.
         //
         class Access {
         public:
+            Access(void);
             Access(const json & config);
             json to_config(void) const;
 
             bool get_read_access(void) const;
             bool get_write_access(void) const;
-            bool get_inherit_flag(void) const;
+            bool get_cascade_flag(void) const;
+            bool get_reset_flag(void) const;
 
             void set_read_access(bool can_read);
             void set_write_access(bool can_write);
-            void set_inherit_flag(bool inherit_flag);
+            void set_cascade_flag(bool cascade_flag);
+            void set_reset_flag(bool cascade_flag);
 
         private:
             bool read_access_ = false;
             bool write_access_ = false;
-            bool inherit_flag_ = false;
+            bool cascade_flag_ = false;
+            bool reset_flag_ = false;
         };
 
 
@@ -73,7 +90,7 @@ namespace sigfs {
         // JSON config format:
         //   {
         //     "uid": 1001,
-        //     "access": [ "read", "directory", "write", "inherit" ]
+        //     "access": [ "read", "directory", "write", "cascade" ]
         //   },
         //   {
         //     "uid": 1002, {
@@ -86,27 +103,23 @@ namespace sigfs {
         // "access" specifies access profile for the user, See Access
         //          documentation for details.
         //
-        class UIDAccessControlMap: public std::map<uid_t, Access> {
+        class AccessControlMap: public std::map<id_t, Access> {
         public:
-            UIDAccessControlMap(const json & config);
-
-            json to_config(void) const;
+            AccessControlMap(const char* id_elem_name, const json & config);
+            json to_config(const char* id_elem_name) const;
+            void get_access(id_t id,
+                            bool& can_read,
+                            bool& can_write,
+                            bool& is_cascaded,
+                            bool& is_reset) const;
         };
 
-        // Access control map for Group IDs
-        // Same as abovem but for user groups.
-        //
-        class GIDAccessControlMap: public std::map<gid_t, Access> {
-        public:
-            GIDAccessControlMap(const json & config);
-            json to_config(void) const;
-        };
 
         //
         // {
         //   name: "vehicle_speed",               // Mandatory name of entry
-        //   "uid_access": ...                    // See UIDAccessControlMap
-        //   "gid_access": ...                    // See GIDAccessControlMap
+        //   "uid_access": ...                    // See AccessControlMap
+        //   "gid_access": ...                    // See AccessControlMap
         //
         class INode {
         public:
@@ -126,25 +139,28 @@ namespace sigfs {
             const FileSystem& owner(void) const;
 
         private:
-            void import_inherited_access_rights(uid_t uid, gid_t gid);
+            void pull_cascaded_access_rights(uid_t uid, gid_t gid);
+
             void get_uid_access(uid_t uid,
                                 bool& uid_can_read,
                                 bool& uid_can_write,
-                                bool& access_is_inherited) const;
+                                bool& uid_access_is_cascadeed,
+                                bool& uid_access_is_reset) const;
+
 
             void get_gid_access(gid_t gid,
                                 bool& gid_can_read,
                                 bool& gid_can_write,
-                                bool& access_is_inherited) const;
-
+                                bool& gid_access_is_cascadeed,
+                                bool& gid_access_is_reset) const;
 
         private:
             const std::string name_;
             const FileSystem& owner_;
             const ino_t inode_;
             const ino_t parent_inode_;
-            UIDAccessControlMap uid_access_;
-            GIDAccessControlMap gid_access_;
+            AccessControlMap uid_access_;
+            AccessControlMap gid_access_;
             std::shared_ptr<INode> parent_entry_;
             bool access_is_cached_;
         };
@@ -156,6 +172,9 @@ namespace sigfs {
         class File: public INode {
         public:
             File(FileSystem& owner, const ino_t parent_inode, const json& config);
+
+            std::shared_ptr<Queue> queue(void);
+
             static bool is_file(INode* obj) {
                 return (dynamic_cast<File*>(obj) != nullptr);
             }
@@ -164,7 +183,10 @@ namespace sigfs {
                 return (std::dynamic_pointer_cast<File>(obj) != nullptr);
             }
 
+            static constexpr uint32_t DEFAULT_QUEUE_LENGTH = 16777216; // 16 MB.
         private:
+            const Queue::index_t queue_length_;
+            std::shared_ptr<Queue> queue_;
         };
 
 
@@ -207,16 +229,10 @@ namespace sigfs {
     private:
         static constexpr int ROOT_INODE = 1;
 
-        enum DefaultAccess {
-            DefaultNoAccess = 0,
-            DefaultWriteAccess,
-            DefaultReadAccess,
-            DefaultReadWriteAccess
-        };
-
         std::map<const ino_t, std::shared_ptr<INode>> inode_entries_;
         mutable ino_t next_inode_nr_ = 1;
-        bool inherit_access_rights_ = false;
+//        bool cascade_access_rights_ = false;
         std::shared_ptr<Directory> root_;
     };
 }
+#endif // __FS_HH__

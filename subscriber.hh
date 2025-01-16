@@ -19,10 +19,9 @@
 namespace sigfs {
     using index_t = std::int32_t;
 
-
     class Subscriber {
     public:
-        Subscriber(Queue& queue):
+        Subscriber(std::shared_ptr<Queue> queue):
             queue_(queue),
             sig_id_(0),
             interrupted_(false)
@@ -32,7 +31,7 @@ namespace sigfs {
 
             std::lock_guard<std::mutex> lock(mutex_);
             sub_id_ = next_sub_id++;
-            queue_.initialize_subscriber(*this);
+            queue_->initialize_subscriber(*this);
         };
 
         inline const int sub_id(void) const
@@ -53,10 +52,10 @@ namespace sigfs {
 
         inline void interrupt_dequeue(void)
         {
-            queue_.interrupt_dequeue(*this);
+            queue_->interrupt_dequeue(*this);
         }
 
-        inline Queue& queue(void)
+        inline std::shared_ptr<Queue> queue(void)
         {
             return queue_;
         }
@@ -73,12 +72,12 @@ namespace sigfs {
 
         const signal_count_t signal_available(void) const
         {
-            return queue_.signal_available(*this);
+            return queue_->signal_available(*this);
         }
 
 
     private:
-        Queue& queue_;
+        std::shared_ptr<Queue> queue_;
         signal_id_t sig_id_; // The Id of the next signal we are about to read.
         int sub_id_; // Used to color separate logging on a per subscribed basis
         bool interrupted_; // Set to true to indicate that a dequeue_signal() has been interrupted.
