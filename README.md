@@ -153,12 +153,14 @@ will return `EPERM`.
 
 # BUILDING SIGFS
 
+On Ubuntu 24.04:
+
+    $ sudo apt install libfuse3-dev
+    $ sudo apt install nlohmann-json3-dev 
     $ make
-    
+
 The package `libfuse3-dev` needs to be installed to provide the FUSE
 library and header files.
-
-
 
 # STARTING SIGFS
 
