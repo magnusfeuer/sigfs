@@ -55,7 +55,7 @@ void usage(const char* name)
     puts("-P payload-size           Number of bytes to send in each signal. Min: 8. Default: 8");
     puts("-c signal-count           How many signals to each publisher send. Default 1000000");
     puts("-b batch-size             How many signals do each publisher pack into a single write operation. Default: 1");
-    puts("-t test-name              Label to print on test pass or fail. Defaul: \"unnamed test\"");
+    puts("-t test-name              Label to print on test pass or fail. Default: \"unnamed test\"");
 }
 
 #ifdef SIGFS_LOG
@@ -415,6 +415,11 @@ int main(int argc,  char *const* argv)
         exit(1);
     }
 
+    SIGFS_LOG_INFO("nr-publishers: %d, nr-subscribers: %d, total-signal-count: %d",
+           nr_publishers,
+           nr_subscribers,
+           signal_count * nr_publishers);
+
     //
     // Launch a bunch of subscriber threads.
     //
@@ -447,13 +452,13 @@ int main(int argc,  char *const* argv)
     auto done = sigfs_usec_since_start();
 #endif
 
-    SIGFS_LOG_INFO("nr-publishers: %d, nr-subscribers: %d, total-signal-count: %d\n",
+    SIGFS_LOG_INFO("nr-publishers: %d, nr-subscribers: %d, total-signal-count: %d",
            nr_publishers,
            nr_subscribers,
            signal_count * nr_publishers);
 
-    SIGFS_LOG_INFO("payload size   usec/signal   signals/sec   mbyte/sec/subscriber   signals received\n");
-    SIGFS_LOG_INFO("%12lu %13.2f %13.0f %11.3f %18d\n",
+    SIGFS_LOG_INFO("payload size   usec/signal   signals/sec   mbyte/sec/subscriber   signals received");
+    SIGFS_LOG_INFO("%12lu %13.2f %13.0f %11.3f %18d",
            payload_size,
            (float) done / (float) (signal_count * nr_publishers),
            (float) (signal_count*nr_publishers) / (float) (done / 1000000.0),

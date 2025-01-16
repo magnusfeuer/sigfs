@@ -28,10 +28,8 @@ test_file_access()
     launch_sigfs ${TEST_TMP} "$CFG" "$@"
     local STAT=$(stat --printf='%A' ${TEST_FILE}) 
     
-    # Kill the sigfs process
-    kill -1 ${SIGFS_PID}
-    wait $SIGFS_PID
-
+    kill_sigfs
+    
     if [ "$STAT" != "$EXPECTED_PERMISSIONS" ]
     then
         echo "${TEST_FILE} permissions ${STAT} did not match expected ${EXPECTED_PERMISSIONS}"

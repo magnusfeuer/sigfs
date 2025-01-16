@@ -38,3 +38,18 @@ launch_sigfs()
     SIGFS_PID=$!
     sleep 0.2
 }
+
+# Kill sigfs process previously launched with launch_sigfs
+kill_sigfs()
+{
+    if [ -n "$SIGFS_PID" ]
+    then
+        # Kill the sigfs process
+        kill -1 ${SIGFS_PID}
+        wait $SIGFS_PID
+    fi
+}
+
+
+SIGFS_PID=""
+trap kill_sigfs SIGINT SIGTERM
