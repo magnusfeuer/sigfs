@@ -836,6 +836,12 @@ int main(int argc, char *argv[])
     if (fuse_session_mount(se, opts.mountpoint) != 0)
         goto err_out3;
 
+    if (opts.max_threads == UINT_MAX)
+        opts.max_threads = 10;
+
+    if (opts.max_idle_threads == UINT_MAX)
+        opts.max_idle_threads = 10;
+
     opts.foreground = 1;
     fuse_daemonize(opts.foreground);
     // Move us back from root directory.
