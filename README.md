@@ -186,7 +186,7 @@ The following command line arguments are supported, with the FUSE arguments bein
 | `-s`                                       | Yes            | N/A     | Operate in single-thread mode.                                                 |
 | `-o clone_fd`                              | Yes            | N/A     | Use separate fuse device fd for each thread for possibly improved performance. |
 | `-o max_idle_threads=<thread-count>`       | Yes            | 1       | Maximum number of idle worker threads allowed.                                 |
-| `-o max_threads=<thread-count>`            | Yes            | 10      | aximum number of worker threads allowed.                                       |
+| `-o max_threads=<thread-count>`            | Yes            | 10      | Maximum number of workfer threads allowed.                                       |
 | `-o allow_other`                           | Yes            | N/A     | Allows access by all users.                                                    |
 | `-o allow_root`                            | Yes            | N/A     | Allow access by root.                                                          |
 | `-o auto_unmount`                          | Yes            | N/A     | Automatically unmount file system when process terminates.                     |
