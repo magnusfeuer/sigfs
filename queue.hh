@@ -97,7 +97,7 @@ namespace sigfs {
         // are done with the relevant resoruces mutex-locked only once at the beginning
         // of the dequeue_signal() call.
         //
-        // If not singal is available, this method will block until
+        // If not signal is available, this method will block until
         // another thread calls queue_signal().
         //
         // See below for instructions on how to interrupt this call.
