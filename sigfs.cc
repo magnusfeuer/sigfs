@@ -319,11 +319,11 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
 {
     SIGFS_LOG_DEBUG("do_open(file_inode: %lu): Called", file_inode);
 
+    // g_fsys->lookup_inode() will termiante program if inode not found.
     auto file_entry = g_fsys->lookup_inode(file_inode);
 
-    // g_fsys->lookup_inode() will termiante program if inode not found.
-    // If we have a null pointer here, it is because dymaic cast is failing due to
-    // the fact that we are trying to open a directory.
+    //
+    // Check that we are trying to open a file, and nothing else.
     //
     if (!FileSystem::File::is_file(file_entry)) {
         SIGFS_LOG_DEBUG("do_open(file_inode: %lu): Inode is not a file.\n", file_inode);
@@ -622,6 +622,15 @@ static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
     SIGFS_LOG_INDEX_DEBUG(index, "do_write(%lu): Processed %d bytes", ino, size);
 }
 
+void  do_poll(fuse_req_t req,
+              fuse_ino_t ino,
+              struct fuse_file_info *fi,
+              struct fuse_pollhandle *ph)
+{
+    // It works. Stop whining.
+//    Subscriber* sub{(Subscriber*) fi->fh};
+
+}
 
 static void dummy_log(fuse_log_level level, const char *fmt, va_list ap)
 {
@@ -822,6 +831,7 @@ int main(int argc, char *argv[])
         .read	     = do_read,
         .write	     = do_write,
         .readdir     = do_readdir,
+        .poll        = do_poll,
     };
 
 

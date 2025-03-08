@@ -134,9 +134,9 @@ void Queue::queue_signal(const char* data, const size_t data_size)
         // Nil Sig ID for clarity. No functionality is associated with this.
         queue_[head_].set_sig_id(0);
 
-        // Notify other queue_signal() callers waiting on conditional lock above
-        cond_.notify_all();
     }
+    // Notify other dequeue_signal() callers waiting on conditional lock above
+    cond_.notify_all();
 
     return;
 }
@@ -182,9 +182,9 @@ const bool Queue::signal_available_(const Subscriber& sub) const
 
 void Queue::interrupt_dequeue(Subscriber& sub)
 {
-    SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "interrupt_dequeue(): Called", sub.sig_id());
+    SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "interrupt_dequeue(): Called");
     std::unique_lock<std::mutex> lock(mutex_);
-    SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "interrupt_dequeue(): Lock acquired", sub.sig_id());
+    SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "interrupt_dequeue(): Lock acquired");
 
     // Wait for condition to be fulfilled.
     cond_.wait(lock, [](void) { return true; });

@@ -20,6 +20,7 @@ FileSystem::File::File(FileSystem& owner, const ino_t parent_inode, const json& 
 
 std::shared_ptr<Queue> FileSystem::File::queue(void)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (queue_ == nullptr) {
         queue_ = std::make_shared<Queue>(queue_length_);
         if (queue_ == nullptr) {

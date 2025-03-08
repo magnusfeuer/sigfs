@@ -15,6 +15,9 @@
 namespace sigfs {
     template<typename CallbackT>
 
+    // Called by multiple different threads, each processing their own
+    // sigfs.cc::do_read() call to read a signal for a specific file descriptor.
+    //
     // Return true if we were not interrupted.
     // Return false if we were interrupted.
     bool Queue::dequeue_signal(Subscriber& sub,
@@ -47,7 +50,6 @@ namespace sigfs {
         const Queue& self(*this);
         auto check =
             [&self, &sub] {
-
                 //
                 // Are we interrupted?
                 //
@@ -87,17 +89,17 @@ namespace sigfs {
                 //                       self.queue_[self.index(sub.sig_id())].sig_id(),
                 //                       sub.sig_id(),
                 //                       (self.queue_[self.index(sub.sig_id())].sig_id() - sub.sig_id()));
-
                 return true;
             };
 
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): Lock acquired", sub.sig_id());
+            SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): Lock acquired");
 
             // Wait for condition to be fulfilled.
             cond_.wait(lock, check);
 
+            SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): condition signalled");
             // Were we interrupted?
             if (sub.is_interrupted()) {
                 (void) cb( userdata, 0, 0, 0, 0, 0);

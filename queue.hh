@@ -49,10 +49,11 @@ namespace sigfs {
         };
 
         // Callback invoked by dequeue_signal() with locked and protected payload.
+        //
         // This callbackl is invoked one or more times by
         // dequeue_signal() in order to deliver the next signal in the
-        // queue for the subscriber provided to dequeue_signal().
-        // The following argbuments are provided
+        // queue for the subscriber provided to dequeue_signal().  The
+        // following arguments are provided:
         //
         // userdata - Same argument as provided to dequeue_signal().
         // signal_id - Unique ID for the signal, will never be repeated for the lifespan of self.
@@ -265,8 +266,8 @@ namespace sigfs {
         // Conditional variable setup used to
         // ensure that subscriber threads always have priority
         //
-        mutable std::mutex prio_mutex_;
-        mutable std::condition_variable prio_cond_;
+//        mutable std::mutex prio_mutex_;
+//        mutable std::condition_variable prio_cond_;
         mutable int active_subscribers_;
 
         signal_id_t next_sig_id_; // Monotonic transaction id.
