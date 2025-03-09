@@ -57,6 +57,38 @@ namespace sigfs {
             queue_->initialize_subscriber(*this);
         };
 
+        virtual ~Subscriber(void)
+        {}
+
+
+        void subscribe_read_ready_notifications(void) {
+//            std::make_shared<Directory>(owner, inode(), entry);
+            //https://en.cppreference.com/w/cpp/memory/enable_shared_from_this
+//            queue_->subscribe_read_ready_notifications(std::make_shared<Subscriber>(this));
+        }
+
+        void subscribe_write_ready_notifications(void) {
+//            queue_->subscribe_write_ready_notifications(*this);
+        }
+
+        void unsubscribe_read_ready_notifications(void) {
+//            queue_->unsubscribe_read_ready_notifications(*this);
+        }
+
+        void unsubscribe_write_ready_notifications(void) {
+//            queue_->unsubscribe_write_ready_notifications(*this);
+        }
+
+        // Called by Queue when dequeue() has been called and freed up
+        // space for others to call queue()
+        //
+        virtual void queue_write_ready(void) {};
+
+        // Called by Queue when queue() has been called and installed
+        // data for others to retreive with dequeue()
+        //
+        virtual void queue_read_ready(void) {};
+
         inline const int sub_id(void) const
         {
             return sub_id_;

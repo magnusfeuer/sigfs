@@ -93,11 +93,11 @@ namespace sigfs {
             };
 
         {
-            std::unique_lock<std::mutex> lock(mutex_);
+            std::unique_lock<std::mutex> lock(read_ready_mutex_);
             SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): Lock acquired");
 
             // Wait for condition to be fulfilled.
-            cond_.wait(lock, check);
+            read_ready_cond_.wait(lock, check);
 
             SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): condition signalled");
             // Were we interrupted?
@@ -130,13 +130,13 @@ namespace sigfs {
 
             while(true) {
                 //
-                // We do the callback since signal is protected by mutex_.
+                // We do the callback since signal is protected by read_ready_mutex_.
                 // Once this callback returns, the mutex will unlock when lock is detroyed
                 // and the signal provded as an argument becomes unprotected.
                 //
-                // There seems to be no easy way to keep the mutex_ locked
+                // There seems to be no easy way to keep the read_ready_mutex_ locked
                 // after a unique_lock() is detroyed, which is what we would need
-                // if we were to continue to have mutex_ locked after the conditional
+                // if we were to continue to have read_ready_mutex_ locked after the conditional
                 // wait cycle is over.
                 //
                 // We could do recursive locks and lock it one extra time, but that
@@ -185,6 +185,11 @@ namespace sigfs {
           }
           }
         */
+
+        // Signal all write notification subscribers that data is available
+//        for(auto const& iter: write_notifiers_)
+//            (*iter).queue_write_ready();
+
         return true; // Not interrupted.
     }
 }

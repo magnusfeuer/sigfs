@@ -17,6 +17,7 @@
 #include <time.h>
 #include <string.h>
 #include <errno.h>
+#include <poll.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -30,6 +31,101 @@
 #include "queue_impl.hh"
 
 using namespace sigfs;
+
+
+// PolledSubscriber
+// A standard subscriber with support for struct fuse_pollhandle
+// and poll events, used by the fuse poll subsystem.
+//
+class PolledSubscriber: public Subscriber, std::enable_shared_from_this<PolledSubscriber> {
+public:
+    PolledSubscriber(std::shared_ptr<Queue> queue):
+        Subscriber(queue),
+        poll_handle_(nullptr),
+        poll_events_(0x00000000)
+    {
+    }
+
+    ~PolledSubscriber(void)
+    {
+        // Wipe poll_handle if set.
+        if (poll_handle_)
+            fuse_pollhandle_destroy(poll_handle_);
+    }
+
+
+    // Called by Queue when dequeue() has been called and freed up
+    // space for others to call queue()
+    //
+    virtual void queue_write_ready(void) {
+        if (!poll_handle_)
+            return;
+
+        fuse_lowlevel_notify_poll(poll_handle_);
+        // Do not destroy poll handle since we may still
+        // get a queue_read_ready() notification.
+    };
+
+    // Called by Queue when queue() has been called and installed
+    // data for others to retreive with dequeue()
+    //
+    virtual void queue_read_ready(void) {
+        if (!poll_handle_)
+            return;
+
+        // Do we have signals available?
+        if (signal_available() > 0)
+            fuse_lowlevel_notify_poll(poll_handle_);
+
+        // Do not destroy poll handle since we may still
+        // get a queue_write_ready() notification.
+    };
+
+    inline struct fuse_pollhandle* poll_handle(void) const
+    {
+        return poll_handle_;
+    }
+
+
+    inline struct fuse_pollhandle* poll_handle(struct fuse_pollhandle* ph)
+    {
+        // Delete old poll handle
+        if (poll_handle_)
+            fuse_pollhandle_destroy(poll_handle_);
+
+        return poll_handle_ = ph;
+    }
+
+    inline uint32_t poll_events(void) const { return poll_events_;  }
+
+    inline uint32_t poll_events(uint32_t pe) {
+
+        // Subscribe to read notifications, if not already done.
+        if ((pe & POLLIN) && !(poll_events_ & POLLIN))
+            queue()->subscribe_read_ready_notifications(shared_from_this());
+
+        // Unsubscribe to read notifications, if needed
+        if (!(pe & POLLIN) && (poll_events_ & POLLIN))
+            queue()->unsubscribe_read_ready_notifications(shared_from_this());
+
+        // Subscribe to write notifications, if not already done.
+        if ((pe & POLLOUT) && !(poll_events_ & POLLOUT))
+            queue()->subscribe_write_ready_notifications(shared_from_this());
+
+        // Unsubscribe to write notifications, if needed
+        if (!(pe & POLLOUT) && (poll_events_ & POLLOUT))
+            queue()->unsubscribe_write_ready_notifications(shared_from_this());
+
+        poll_events_ = pe;
+
+        return poll_events_;
+
+    }
+
+private:
+    struct fuse_pollhandle* poll_handle_;
+    uint32_t poll_events_;
+};
 
 
 // Globals for the win
@@ -96,6 +192,47 @@ static void print_file_info(const char* prefix, uint32_t flags)
     if (flags & O_APPEND) strcat(res, " O_APPEND");
     SIGFS_LOG_DEBUG(res);
 }
+
+
+static void print_poll_info(const char* prefix, uint32_t events)
+{
+    if (_sigfs_log_level != SIGFS_LOG_LEVEL_DEBUG)
+        return;
+
+    char res[1025];
+    sprintf(res, "%s  poll ev[%.8X]:", prefix, events);
+    if (events & POLLIN) strcat(res, " POLLIN");
+    if (events & POLLOUT) strcat(res, " POLLOUT");
+    if (events & POLLPRI) strcat(res, " POLLPRI");
+    if (events & POLLERR) strcat(res, " POLLERR");
+    if (events & POLLHUP) strcat(res, " POLLHUP");
+    if (events & POLLNVAL) strcat(res, " POLLNVAL");
+
+#ifdef POLLRDNORM
+    if (events & POLLRDNORM) strcat(res, " POLLRDNORM");
+#endif
+#ifdef POLLRDBAND
+    if (events & POLLRDBAND) strcat(res, " POLLRDBAND");
+#endif
+#ifdef POLLWRNORM
+    if (events & POLLWRNORM) strcat(res, " POLLWRNORM");
+#endif
+#ifdef POLLWRBAND
+    if (events & POLLWRBAND) strcat(res, " POLLWRBAND");
+#endif
+#ifdef POLLMSG
+    if (events & POLLMSG) strcat(res, " POLLMSG");
+#endif
+#ifdef POLLREMOVE
+    if (events & POLLREMOVE) strcat(res, " POLLREMOVE");
+#endif
+#ifdef POLLRDHUP
+    if (events & POLLMSG) strcat(res, " POLLRDHUP");
+#endif
+
+    SIGFS_LOG_DEBUG(res);
+}
+
 
 
 
@@ -317,7 +454,7 @@ static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
 
 static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info *fi)
 {
-    SIGFS_LOG_DEBUG("do_open(file_inode: %lu): Called", file_inode);
+    SIGFS_LOG_DEBUG("do_open(file_inode: %lu | fi=%p): Called", file_inode, fi);
 
     // g_fsys->lookup_inode() will termiante program if inode not found.
     auto file_entry = g_fsys->lookup_inode(file_inode);
@@ -373,7 +510,7 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
     // dynamic_pointer_cast<>() will always work since we verified that the entry is a file at the
     // beginning of this function.
     //
-    Subscriber *sub = new Subscriber(std::dynamic_pointer_cast<FileSystem::File>(file_entry)->queue());
+    PolledSubscriber *sub = new PolledSubscriber(std::dynamic_pointer_cast<FileSystem::File>(file_entry)->queue());
     fi->fh = (uint64_t) sub; // It works. Stop whining.
     fi->direct_io=1;
     fi->nonseekable=1;
@@ -388,7 +525,7 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
 
 static void read_interrupt(fuse_req_t req, void *data)
 {
-    Subscriber* sub{(Subscriber*) data};
+    PolledSubscriber* sub{(PolledSubscriber*) data};
     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "read_interrupt(): Called");
     sub->interrupt_dequeue();
 }
@@ -399,7 +536,7 @@ static void do_read(fuse_req_t req, fuse_ino_t file_inode, size_t size,
 {
 
     // It works. Stop whining.
-    Subscriber* sub{(Subscriber*) fi->fh};
+    PolledSubscriber* sub{(PolledSubscriber*) fi->fh};
 
     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(%lu): Called. Size[%lu]. offset[%ld]", file_inode, size, offset);
 
@@ -509,37 +646,6 @@ static void do_read(fuse_req_t req, fuse_ino_t file_inode, size_t size,
     SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Sending back %d (of max %d) iov entries. Total length: %lu",
                           iov_ind, IOV_MAX, tot_payload);
 
-
-#ifdef SIGFS_LOG
-    if (sigfs_log_level_get() == SIGFS_LOG_LEVEL_DEBUG) {
-        int byte_ind = 0;
-        char dbg[512];
-        int len = 0;
-        for(uint32_t ind = 0; ind < iov_ind; ++ind) {
-            for(uint32_t ind1 = 0; ind1 < iov[ind].iov_len; ++ind1) {
-                char* ptr = (char*) iov[ind].iov_base + ind1;
-
-                if ((byte_ind % 24) == 0) {
-                    if (len)
-                        SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), dbg);
-                    // Start new line
-                    len = sprintf(dbg, "read[%d]: ", byte_ind);
-                }
-
-                switch(byte_ind % 24) {
-                case 4:
-                    len += sprintf(dbg + len, "signal_id[%lu] ", *((uint64_t*) ptr));
-                    break;
-
-                case 12:
-                    len += sprintf(dbg + len, "payload_len[%u] ", *((uint32_t*) ptr));
-                    break;
-                }
-                byte_ind++;
-            }
-        }
-    }
-#endif
     check_fuse_call(sub->sub_id(),
                     fuse_reply_iov(req, iov, iov_ind),
                     "do_read(): fuse_reply_iov(%d) returned ",
@@ -552,10 +658,10 @@ static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
                      size_t size, off_t offset, struct fuse_file_info *fi)
 {
     int index = SIGFS_NIL_INDEX;
-    Subscriber* sub((Subscriber*) fi->fh);
+    PolledSubscriber* sub((PolledSubscriber*) fi->fh);
 
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(%lu): Called, offset[%lu] size[%lu]", ino, offset, size);
-
+    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(%lu/%p): Called, offset[%lu] size[%lu]", ino, fi, offset, size);
+    print_poll_info("do_write(): ", sub->poll_events());
 
     // Traverse the buffer to check for integrity
     size_t remaining_bytes = size;
@@ -614,7 +720,7 @@ static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
     //     exit(1);
     // }
 
-    check_fuse_call(index,
+    check_fuse_call(SIGFS_NIL_INDEX,
                     fuse_reply_write(req, size),
                     "do_write(%lu): fuse_reply_write(%lu) returned: ",
                     ino, size);
@@ -628,8 +734,45 @@ void  do_poll(fuse_req_t req,
               struct fuse_pollhandle *ph)
 {
     // It works. Stop whining.
-//    Subscriber* sub{(Subscriber*) fi->fh};
+    PolledSubscriber* sub{(PolledSubscriber*) fi->fh};
 
+    SIGFS_LOG_INDEX_DEBUG(SIGFS_NIL_INDEX, "do_poll(%lu/%p): Called", ino, fi);
+
+    // Check if we are polling for POLLIN and have
+    // elements available for reading.
+    //
+    uint32_t immediate_events = 0;
+    if ((fi->poll_events & POLLIN) && sub->signal_available() > 0)
+        immediate_events |= POLLIN;
+
+#warning CONTINUE HERE
+    if ((fi->poll_events & POLLOUT) && sub->signal_available() > 0) 
+        immediate_events |= POLLOUT;
+
+    // Do we have either poll in or poll out?
+    if (immediate_events) {
+        check_fuse_call(SIGFS_NIL_INDEX,
+                        fuse_reply_poll(req, immediate_events),
+                        "do_poll(%lu): fuse_reply_poll(POLLIN) returned: ", ino);
+
+        if (ph)
+            fuse_pollhandle_destroy(ph);
+
+        return;
+    }
+
+    // Rembember the poll handle.
+    // It is undocumented if we can destroy this poll handle if there
+    // is already data available
+    sub->poll_handle(ph);
+
+    // poll_events() will setup the necessary subscription.
+    sub->poll_events(fi->poll_events);
+
+    check_fuse_call(SIGFS_NIL_INDEX,
+                    fuse_reply_err(req, EINVAL),
+                    "do_poll(%lu): fuse_reply_err(EINVAL) [1] returned: ", ino);
+    return;
 }
 
 static void dummy_log(fuse_log_level level, const char *fmt, va_list ap)
