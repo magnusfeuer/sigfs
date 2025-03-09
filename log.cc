@@ -177,7 +177,7 @@ const char* sigfs_index_color(int index)
 {
     switch(index) {
     case -1:
-        return sigfs_log_color_faint();
+        return sigfs_log_color_none();
 
     case 0:
         return sigfs_log_color_dark_blue();
