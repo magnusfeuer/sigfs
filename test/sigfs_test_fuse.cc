@@ -76,23 +76,16 @@ void publish_signal_sequence(const char* filename, const uint32_t publish_id, ui
     uint32_t sequence_nr{0};
     char buf[(sizeof(sigfs_payload_t)+payload_size)*batch_size + 256];
 
-#ifdef SIGFS_LOG
-    int log_ind{0};
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        log_ind = next_log_ind++;
-    }
-#endif
 
-    SIGFS_LOG_INDEX_DEBUG(log_ind, "Publishing %d signals to %s", count, filename);
+    SIGFS_LOG_DEBUG("Publishing %d signals to %s", count, filename);
     int fd = open(filename, O_WRONLY);
 
     if (fd == -1) {
-        SIGFS_LOG_INDEX_FATAL(log_ind, "Could not open file %s: %s", filename, strerror(errno));
+        SIGFS_LOG_FATAL("Could not open file %s: %s", filename, strerror(errno));
         fail("Could not open file");
     }
 
-    SIGFS_LOG_INDEX_DEBUG(log_ind, "Called. Publishing %d signals to %s", count, filename);
+    SIGFS_LOG_DEBUG("Called. Publishing %d signals to %s", count, filename);
 
     // Fill buffer with sequence data as dummy payload
     for(uint64_t i = 0; i < sizeof(buf); ++i)
@@ -117,7 +110,7 @@ void publish_signal_sequence(const char* filename, const uint32_t publish_id, ui
             payload->payload_size = payload_size;
 
             memcpy((char*) payload->payload, (char*) &tst_payload, sizeof(tst_payload));
-            SIGFS_LOG_INDEX_DEBUG(log_ind, "Publishing signal pub_id[%.3u] seq_nr[%.8u]", publish_id, sequence_nr);
+            SIGFS_LOG_DEBUG("Publishing signal pub_id[%.3u] seq_nr[%.8u]", publish_id, sequence_nr);
             tot_size += SIGFS_PAYLOAD_SIZE(payload);
             ++batch_nr;
             ++sequence_nr;
@@ -131,7 +124,7 @@ void publish_signal_sequence(const char* filename, const uint32_t publish_id, ui
                 sigfs_payload_t *payload = (sigfs_payload_t*) &buf[ind1];
                 test_payload_t* test_payload = (test_payload_t*) payload->payload;
 
-                SIGFS_LOG_INDEX_DEBUG(log_ind, "write[%d]  payload_len[%lu] pub_id[%u] seq_nr[%u]",
+                SIGFS_LOG_DEBUG("write[%d]  payload_len[%lu] pub_id[%u] seq_nr[%u]",
                                       ind1,
                                       payload->payload_size,
                                       test_payload->publisher_id,
@@ -144,19 +137,19 @@ void publish_signal_sequence(const char* filename, const uint32_t publish_id, ui
 
         ssize_t res = write(fd, buf, tot_size);
         if (res != tot_size) {
-            SIGFS_LOG_INDEX_FATAL(log_ind, "Could not write %lu bytes to file %s. Got %lu bytes written: %s",
+            SIGFS_LOG_FATAL("Could not write %lu bytes to file %s. Got %lu bytes written: %s",
                                   tot_size, filename, strerror(errno), res);
             fail("Could not write to file");
         }
 
-        SIGFS_LOG_INDEX_DEBUG(log_ind, "Published %d signals [%.3d][%.8d]-[%.3d][%.8d]", batch_nr, publish_id, start_sequence_nr, publish_id, sequence_nr-1);
+        SIGFS_LOG_DEBUG("Published %d signals [%.3d][%.8d]-[%.3d][%.8d]", batch_nr, publish_id, start_sequence_nr, publish_id, sequence_nr-1);
 
         // Are we done?
         if (!count)
             break;
     }
     close(fd);
-    SIGFS_LOG_INDEX_DEBUG(log_ind, "Done. Published %d signals to %s", count, filename);
+    SIGFS_LOG_DEBUG("Done. Published %d signals to %s", count, filename);
 }
 
 int check_payload_integrity(char* buf, ssize_t buf_sz,
@@ -177,29 +170,29 @@ int check_payload_integrity(char* buf, ssize_t buf_sz,
     while(bytes_left) {
         sigfs_signal_t *sig = ((sigfs_signal_t*) (buf + offset));
 
-        SIGFS_LOG_INDEX_DEBUG(log_ind, "%ld bytes to validate.", bytes_left);
+        SIGFS_LOG_DEBUG("%ld bytes to validate.", bytes_left);
         if (bytes_left < (ssize_t) sizeof(sigfs_signal_t)) {
-            SIGFS_LOG_INDEX_FATAL(log_ind, "Need at least %lu bytes for signal header, got %lu",
+            SIGFS_LOG_FATAL("Need at least %lu bytes for signal header, got %lu",
                                   sizeof(sigfs_signal_t), bytes_left);
             fail("Could not read signal header");
         }
 
         if (bytes_left < (ssize_t) SIGFS_SIGNAL_SIZE(sig)) {
-            SIGFS_LOG_INDEX_FATAL(log_ind, "Signal header + payload size is %lu, got %d bytes",
+            SIGFS_LOG_FATAL("Signal header + payload size is %lu, got %d bytes",
                                   bytes_left, sig->payload.payload_size);
             fail("Could not read atomic signal");
         }
 
 
         if (sig->payload.payload_size != payload_size) {
-            SIGFS_LOG_INDEX_FATAL(log_ind, "Wanted payload size of %lu, got %d",
+            SIGFS_LOG_FATAL("Wanted payload size of %lu, got %d",
                                   payload_size, sig->payload.payload_size);
             fail("Incorrect payload size");
 
         }
 
         if (sig->lost_signals > 0) {
-            SIGFS_LOG_INDEX_FATAL(log_ind, "Lost %d signals after processing %d signals",
+            SIGFS_LOG_FATAL("Lost %d signals after processing %d signals",
                                   sig->lost_signals, signals_processed + new_signals_processed);
             fail("Lost signals");
         }
@@ -210,16 +203,16 @@ int check_payload_integrity(char* buf, ssize_t buf_sz,
         pub_id = *((int*) sig->payload.payload);
         sig_id = *((int*) (sig->payload.payload + sizeof(int)));
         if (pub_id < 0 || pub_id >= pub_count) {
-            SIGFS_LOG_INDEX_FATAL(log_ind, "Publisher id %d is out of range [0-%d]", pub_id, pub_count - 1);
+            SIGFS_LOG_FATAL("Publisher id %d is out of range [0-%d]", pub_id, pub_count - 1);
             fail("Publisher out of range");
         }
 
-        SIGFS_LOG_INDEX_DEBUG(log_ind, "SigID[%lu] - pub_id[%.3d] Comparing expected signal ID [%.8d] with received [%.8d]",
+        SIGFS_LOG_DEBUG("SigID[%lu] - pub_id[%.3d] Comparing expected signal ID [%.8d] with received [%.8d]",
                               sig->signal_id, pub_id, expected_sigid[pub_id], sig_id);
 
         // Check that the rest of the signal payload after prefix matches expectations.
         if (sig_id != expected_sigid[pub_id]) {
-            SIGFS_LOG_INDEX_FATAL(log_ind, "pub_id[%.3d] Expected signal ID [%.8d], received [%.8d]. Payoad size[%d] sigfs_signal_id[%lu]. rd_res[%lu]. bytes_left[%lu] offset[%lu]",
+            SIGFS_LOG_FATAL("pub_id[%.3d] Expected signal ID [%.8d], received [%.8d]. Payoad size[%d] sigfs_signal_id[%lu]. rd_res[%lu]. bytes_left[%lu] offset[%lu]",
                                   pub_id, expected_sigid[pub_id], sig_id, sig->payload.payload_size, sig->signal_id, buf_sz, bytes_left, offset);
 
             int len = 0;
@@ -227,7 +220,7 @@ int check_payload_integrity(char* buf, ssize_t buf_sz,
                 char* ptr = &buf[ind1];
 
                 if ((ind1 % 24) == 0) {
-                    SIGFS_LOG_INDEX_FATAL(log_ind, dbg);
+                    SIGFS_LOG_FATAL(dbg);
                     // Start new line
                     len = sprintf(dbg, "read[%d]: ", ind1);
                 }
@@ -262,7 +255,7 @@ int check_payload_integrity(char* buf, ssize_t buf_sz,
         offset += SIGFS_SIGNAL_SIZE(sig);
         bytes_left -= SIGFS_SIGNAL_SIZE(sig);
 
-        // SIGFS_LOG_INDEX_DEBUG(log_ind, "Offset: %lu  rd_res: %lu. bytes_left: %lu", offset, rd_res, bytes_left);
+        // SIGFS_LOG_DEBUG("Offset: %lu  rd_res: %lu. bytes_left: %lu", offset, rd_res, bytes_left);
     }
     return new_signals_processed;
 }
@@ -305,22 +298,22 @@ void check_signal_sequence_thread(const char* filename,
         log_ind = next_log_ind++;
     }
 #endif
-    SIGFS_LOG_INDEX_DEBUG(log_ind, "Validating %d signals from %s",
+    SIGFS_LOG_DEBUG("Validating %d signals from %s",
                           total_signal_count, filename);
     int fd = open(filename, O_RDONLY);
 
     if (fd == -1) {
-        SIGFS_LOG_INDEX_FATAL(log_ind, "Could not open file %s: %s",
+        SIGFS_LOG_FATAL("Could not open file %s: %s",
                               filename, strerror(errno));
         fail("Could not open file");
     }
 
     while(signals_processed < total_signal_count) {
-        SIGFS_LOG_INDEX_DEBUG(log_ind, "Reading %lu bytes signal %d.", sizeof(buf), signal_count * publisher_count - total_signal_count)
+        SIGFS_LOG_DEBUG("Reading %lu bytes signal %d.", sizeof(buf), signal_count * publisher_count - total_signal_count)
         ssize_t rd_res = read(fd, buf, sizeof(buf));
 
         if (rd_res == -1) {
-            SIGFS_LOG_INDEX_FATAL(log_ind, "Could not read from file %s: %s",
+            SIGFS_LOG_FATAL("Could not read from file %s: %s",
                                   filename, strerror(errno));
             fail("Could not read file");
         }
@@ -331,7 +324,7 @@ void check_signal_sequence_thread(const char* filename,
                 sigfs_signal_t *signal = (sigfs_signal_t*) &buf[ind1];
                 test_payload_t *payload = (test_payload_t*) signal->payload.payload;
 
-                SIGFS_LOG_INDEX_DEBUG(log_ind, "read[%d]: lost_signals[%lu] signal_id[%lu] payload_size[%u] - publisher_id[%u] sequence_nr[%u]",
+                SIGFS_LOG_DEBUG("read[%d]: lost_signals[%lu] signal_id[%lu] payload_size[%u] - publisher_id[%u] sequence_nr[%u]",
                                       ind1,
                                       signal->lost_signals,
                                       signal->signal_id,
@@ -442,7 +435,7 @@ void check_signal_sequence_poll(const char* filename,
     while(total_signals_left > 0) {
         SIGFS_LOG_DEBUG("Polling on %d descriptors", reader_count);
 
-        int ready_cnt = poll(pfd, reader_count, 100);
+        int ready_cnt = poll(pfd, reader_count, 500);
 
         // Timeout?
         if (!ready_cnt)
@@ -468,8 +461,8 @@ void check_signal_sequence_poll(const char* filename,
 
             // Did we get anything else than POLLIN
             if (pfd[cur_pos].revents != POLLIN) {
-                SIGFS_LOG_FATAL("poll return event for descriptor %d was not POLLIN: 0x%.4X",
-                                pfd[cur_pos].fd, pfd[cur_pos].revents);
+                SIGFS_LOG_FATAL("poll return event for descriptor %d was not POLLIN(0x%.4X): 0x%.4X",
+                                pfd[cur_pos].fd, POLLIN, pfd[cur_pos].revents);
                 fail("Poll returned error");
             }
 

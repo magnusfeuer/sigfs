@@ -61,24 +61,6 @@ namespace sigfs {
         {}
 
 
-        void subscribe_read_ready_notifications(void) {
-//            std::make_shared<Directory>(owner, inode(), entry);
-            //https://en.cppreference.com/w/cpp/memory/enable_shared_from_this
-//            queue_->subscribe_read_ready_notifications(std::make_shared<Subscriber>(this));
-        }
-
-        void subscribe_write_ready_notifications(void) {
-//            queue_->subscribe_write_ready_notifications(*this);
-        }
-
-        void unsubscribe_read_ready_notifications(void) {
-//            queue_->unsubscribe_read_ready_notifications(*this);
-        }
-
-        void unsubscribe_write_ready_notifications(void) {
-//            queue_->unsubscribe_write_ready_notifications(*this);
-        }
-
         // Called by Queue when dequeue() has been called and freed up
         // space for others to call queue()
         //

@@ -37,7 +37,7 @@ using namespace sigfs;
 // A standard subscriber with support for struct fuse_pollhandle
 // and poll events, used by the fuse poll subsystem.
 //
-class PolledSubscriber: public Subscriber, std::enable_shared_from_this<PolledSubscriber> {
+class PolledSubscriber: public Subscriber {
 public:
     PolledSubscriber(std::shared_ptr<Queue> queue):
         Subscriber(queue),
@@ -48,37 +48,23 @@ public:
 
     ~PolledSubscriber(void)
     {
-        // Wipe poll_handle if set.
-        if (poll_handle_)
-            fuse_pollhandle_destroy(poll_handle_);
+        queue()->unsubscribe_read_ready_notifications(this);
     }
 
-
-    // Called by Queue when dequeue() has been called and freed up
-    // space for others to call queue()
-    //
-    virtual void queue_write_ready(void) {
-        if (!poll_handle_)
-            return;
-
-        fuse_lowlevel_notify_poll(poll_handle_);
-        // Do not destroy poll handle since we may still
-        // get a queue_read_ready() notification.
-    };
 
     // Called by Queue when queue() has been called and installed
     // data for others to retreive with dequeue()
     //
     virtual void queue_read_ready(void) {
-        if (!poll_handle_)
+        if (!poll_handle_) {
+            SIGFS_LOG_DEBUG("queue_read_ready(): Called - No poll handle. No action")
             return;
-
-        // Do we have signals available?
-        if (signal_available() > 0)
-            fuse_lowlevel_notify_poll(poll_handle_);
-
-        // Do not destroy poll handle since we may still
-        // get a queue_write_ready() notification.
+        }
+        SIGFS_LOG_DEBUG("queue_read_ready(): Called - Poll handle");
+        fuse_lowlevel_notify_poll(poll_handle_);
+        fuse_pollhandle_destroy(poll_handle_);
+        poll_handle_ = 0;
+        return;
     };
 
     inline struct fuse_pollhandle* poll_handle(void) const
@@ -102,19 +88,11 @@ public:
 
         // Subscribe to read notifications, if not already done.
         if ((pe & POLLIN) && !(poll_events_ & POLLIN))
-            queue()->subscribe_read_ready_notifications(shared_from_this());
+            queue()->subscribe_read_ready_notifications(this);
 
         // Unsubscribe to read notifications, if needed
         if (!(pe & POLLIN) && (poll_events_ & POLLIN))
-            queue()->unsubscribe_read_ready_notifications(shared_from_this());
-
-        // Subscribe to write notifications, if not already done.
-        if ((pe & POLLOUT) && !(poll_events_ & POLLOUT))
-            queue()->subscribe_write_ready_notifications(shared_from_this());
-
-        // Unsubscribe to write notifications, if needed
-        if (!(pe & POLLOUT) && (poll_events_ & POLLOUT))
-            queue()->unsubscribe_write_ready_notifications(shared_from_this());
+            queue()->unsubscribe_read_ready_notifications(this);
 
         poll_events_ = pe;
 
@@ -132,10 +110,9 @@ private:
 std::shared_ptr<FileSystem> g_fsys;
 
 
-static int check_fuse_call(int index, int fuse_result, const char* fmt, ...)
+static int check_fuse_call(int fuse_result, const char* fmt, ...)
 {
 #ifndef SIGFS_LOG
-    (void) index;
     (void) fmt;
     return fuse_result;
 #endif
@@ -150,7 +127,7 @@ static int check_fuse_call(int index, int fuse_result, const char* fmt, ...)
     vsprintf(buf, fmt, ap);
     strcat(buf, strerror(-fuse_result));
     va_end(ap);
-    SIGFS_LOG_INDEX_ERROR(index, buf);
+    SIGFS_LOG_ERROR(buf);
     return fuse_result;
 }
 
@@ -319,8 +296,7 @@ static void do_lookup(fuse_req_t req, fuse_ino_t dir_ino, const char *name)
 
     // Not found?
     if (!entry) {
-        check_fuse_call(SIGFS_NIL_INDEX,
-                        fuse_reply_err(req, ENOENT),
+        check_fuse_call(fuse_reply_err(req, ENOENT),
                         "do_lookup(inode: %lu, name: %s): fuse_reply_err(req, ENOENT) returned: ", dir_ino, name);
         return;
     }
@@ -340,8 +316,7 @@ static void do_lookup(fuse_req_t req, fuse_ino_t dir_ino, const char *name)
 
     SIGFS_LOG_DEBUG("do_lookup( dir_inode: %lu, entry_name: %s): Attributes: 0%o", dir_ino, name, e.attr.st_mode);
 
-    check_fuse_call(SIGFS_NIL_INDEX,
-                    fuse_reply_entry(req, &e),
+    check_fuse_call(fuse_reply_entry(req, &e),
                     "do_lookup(): fuse_reply_entry() returned: ");
     return;
 }
@@ -361,8 +336,7 @@ static void do_getattr(fuse_req_t req, fuse_ino_t entry_ino, struct fuse_file_in
     setup_stat(entry, ctx->uid, ctx->gid, &st);
 
     int res = fuse_reply_attr(req, &st, 1.0);
-    check_fuse_call(SIGFS_NIL_INDEX,
-                    res,
+    check_fuse_call(res,
                     "do_getattr( dir_inode: %lu, entry_name: %s): Failed", entry_ino, entry->name().c_str());
 
     return;
@@ -385,15 +359,13 @@ static int reply_buf_limited(fuse_req_t req, const char *buf, size_t bufsize,
 {
     if ((size_t) off < bufsize) {
         //SIGFS_LOG_DEBUG("reply_buf_limited(): LT");
-        return check_fuse_call(SIGFS_NIL_INDEX,
-                               fuse_reply_buf(req, buf + off, min(bufsize - off, maxsize)),
+        return check_fuse_call(fuse_reply_buf(req, buf + off, min(bufsize - off, maxsize)),
                                "reply_buf_limited(): fuse_reply_buf(%d bytes) returned: ",
                                min(bufsize - off, maxsize));
     }
 
 //    SIGFS_LOG_DEBUG("reply_buf_limited(): GTE");
-    return check_fuse_call(SIGFS_NIL_INDEX,
-                           fuse_reply_buf(req, NULL, 0),
+    return check_fuse_call(fuse_reply_buf(req, NULL, 0),
                            "reply_buf_limited(): fuse_reply_buf(nil) returned: ");
 
 }
@@ -440,8 +412,7 @@ static void do_readdir(fuse_req_t req, fuse_ino_t dir_inode, size_t size,
         dirbuf_add(req, &b, entry->name().c_str(), entry->inode());
     });
 
-    check_fuse_call(SIGFS_NIL_INDEX,
-                    reply_buf_limited(req, b.p, b.size, off, size),
+    check_fuse_call(reply_buf_limited(req, b.p, b.size, off, size),
                     "do_readdir(): reply_buf_limited() returned: ");
 
     SIGFS_LOG_DEBUG("do_readdir(): Done.");
@@ -510,12 +481,11 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
     // dynamic_pointer_cast<>() will always work since we verified that the entry is a file at the
     // beginning of this function.
     //
-    PolledSubscriber *sub = new PolledSubscriber(std::dynamic_pointer_cast<FileSystem::File>(file_entry)->queue());
-    fi->fh = (uint64_t) sub; // It works. Stop whining.
+    PolledSubscriber* sub(new PolledSubscriber(std::dynamic_pointer_cast<FileSystem::File>(file_entry)->queue()));
+    fi->fh = (uint64_t) sub;
     fi->direct_io=1;
     fi->nonseekable=1;
-    check_fuse_call(SIGFS_NIL_INDEX,
-                    fuse_reply_open(req, fi),
+    check_fuse_call(fuse_reply_open(req, fi),
                     "do_open(): fuse_reply_open(): Returned: ");
 
     SIGFS_LOG_DEBUG("do_open(): Returning ok" , sub->sig_id());
@@ -523,10 +493,16 @@ static void do_open(fuse_req_t req, fuse_ino_t file_inode, struct fuse_file_info
 }
 
 
+static void do_release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+{
+    PolledSubscriber* sub((PolledSubscriber*) fi->fh);
+    delete sub;
+}
+
 static void read_interrupt(fuse_req_t req, void *data)
 {
     PolledSubscriber* sub{(PolledSubscriber*) data};
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "read_interrupt(): Called");
+    SIGFS_LOG_DEBUG("read_interrupt(): Called");
     sub->interrupt_dequeue();
 }
 
@@ -538,12 +514,12 @@ static void do_read(fuse_req_t req, fuse_ino_t file_inode, size_t size,
     // It works. Stop whining.
     PolledSubscriber* sub{(PolledSubscriber*) fi->fh};
 
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(%lu): Called. Size[%lu]. offset[%ld]", file_inode, size, offset);
+    SIGFS_LOG_DEBUG("do_read(%lu): Called. Size[%lu]. offset[%ld]", file_inode, size, offset);
 
 
 
     // if (offset != 0) {
-    //     SIGFS_LOG_INDEX_FATAL(sub->sub_id(), "do_read(): Offset %lu not implemented.", offset);
+    //     SIGFS_LOG_FATAL("do_read(): Offset %lu not implemented.", offset);
     //     exit(1);
     // }
 
@@ -571,7 +547,7 @@ static void do_read(fuse_req_t req, fuse_ino_t file_inode, size_t size,
             // Is this an interrupt call?
             //
             if (!payload) {
-                SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Interrupted!");
+                SIGFS_LOG_DEBUG("do_read(): Interrupted!");
                 fuse_req_interrupt_func(req, 0, 0);
 
                 sub->set_interrupted(false);
@@ -580,8 +556,8 @@ static void do_read(fuse_req_t req, fuse_ino_t file_inode, size_t size,
 
             // Do we have enough space left for payload?
             if (size_left < sizeof(sigfs_signal_t) + payload_size) {
-                SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): size_lft[%ld] < signal_size[%lu]. Return!",
-                                      size_left, sizeof(sigfs_signal_t) + payload_size);
+                SIGFS_LOG_DEBUG("do_read(): size_lft[%ld] < signal_size[%lu]. Return!",
+                                size_left, sizeof(sigfs_signal_t) + payload_size);
                 return Queue::cb_result_t::not_processed;
             }
 
@@ -598,13 +574,13 @@ static void do_read(fuse_req_t req, fuse_ino_t file_inode, size_t size,
                 .iov_len=sizeof(sigfs_signal_t)
             };
 
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Adding iov_ind[%d] signal_id[%lu/%lu] payload_size[%u/%u/%u]",
-                                  iov_ind,
-                                  signal_id, 
-                                  sig[sig_ind].signal_id,
-                                  payload_size,
-                                  sig[sig_ind].payload.payload_size,
-                                  ((sigfs_signal_t*) iov[iov_ind].iov_base)->payload.payload_size);
+            SIGFS_LOG_DEBUG("do_read(): Adding iov_ind[%d] signal_id[%lu/%lu] payload_size[%u/%u/%u]",
+                            iov_ind,
+                            signal_id, 
+                            sig[sig_ind].signal_id,
+                            payload_size,
+                            sig[sig_ind].payload.payload_size,
+                            ((sigfs_signal_t*) iov[iov_ind].iov_base)->payload.payload_size);
 
             iov_ind++;
 
@@ -633,8 +609,7 @@ static void do_read(fuse_req_t req, fuse_ino_t file_inode, size_t size,
         // If we were interrupted, this will be done by the lambda
         // function above.
 
-        check_fuse_call(sub->sub_id(),
-                        fuse_reply_err(req, EINTR),
+        check_fuse_call(fuse_reply_err(req, EINTR),
                         "do_read(): Interrupt: fuse_reply_err(req, EINTR) returned: ");
 
 
@@ -643,11 +618,10 @@ static void do_read(fuse_req_t req, fuse_ino_t file_inode, size_t size,
     // Nil out the interrupt function.
     fuse_req_interrupt_func(req, 0, 0);
 
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_read(): Sending back %d (of max %d) iov entries. Total length: %lu",
-                          iov_ind, IOV_MAX, tot_payload);
+    SIGFS_LOG_DEBUG("do_read(): Sending back %d (of max %d) iov entries. Total length: %lu",
+                    iov_ind, IOV_MAX, tot_payload);
 
-    check_fuse_call(sub->sub_id(),
-                    fuse_reply_iov(req, iov, iov_ind),
+    check_fuse_call(fuse_reply_iov(req, iov, iov_ind),
                     "do_read(): fuse_reply_iov(%d) returned ",
                     iov_ind);
     return;
@@ -657,10 +631,9 @@ static void do_read(fuse_req_t req, fuse_ino_t file_inode, size_t size,
 static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
                      size_t size, off_t offset, struct fuse_file_info *fi)
 {
-    int index = SIGFS_NIL_INDEX;
     PolledSubscriber* sub((PolledSubscriber*) fi->fh);
 
-    SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "do_write(%lu/%p): Called, offset[%lu] size[%lu]", ino, fi, offset, size);
+    SIGFS_LOG_DEBUG("do_write(%lu/%p): Called, offset[%lu] size[%lu]", ino, fi, offset, size);
     print_poll_info("do_write(): ", sub->poll_events());
 
     // Traverse the buffer to check for integrity
@@ -670,36 +643,30 @@ static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
 
         // Do we have enough for payload header?
         if (remaining_bytes < sizeof(sigfs_payload_t)) {
-            SIGFS_LOG_INDEX_WARNING(index,
-                                    "do_write(%lu): Unaligned length at %lu bytes. Need at least %lu bytes to process next sigfs_payload_t record. Got %lu bytes",
-                                    ino, size - remaining_bytes, sizeof(sigfs_payload_t), remaining_bytes);
+            SIGFS_LOG_WARNING("do_write(%lu): Unaligned length at %lu bytes. Need at least %lu bytes to process next sigfs_payload_t record. Got %lu bytes",
+                              ino, size - remaining_bytes, sizeof(sigfs_payload_t), remaining_bytes);
 
-            check_fuse_call(index,
-                            fuse_reply_err(req, EINVAL),
+            check_fuse_call(fuse_reply_err(req, EINVAL),
                             "do_write(%lu): fuse_reply_err(EINVAL) [1] returned: ", ino);
             return;
         }
 
         // Do we have enough for payload?
         if (remaining_bytes < sizeof(sigfs_payload_t) + payload->payload_size) {
-            SIGFS_LOG_INDEX_WARNING(index,
-                                    "do_write(%lu): Unaligned length at %lu bytes. Need at least %lu bytes to process next sigfs_payload_t record. Got %lu bytes",
-                                    ino, size - remaining_bytes, sizeof(sigfs_payload_t), remaining_bytes);
+            SIGFS_LOG_WARNING("do_write(%lu): Unaligned length at %lu bytes. Need at least %lu bytes to process next sigfs_payload_t record. Got %lu bytes",
+                              ino, size - remaining_bytes, sizeof(sigfs_payload_t), remaining_bytes);
 
-            check_fuse_call(index,
-                            fuse_reply_err(req, EINVAL),
+            check_fuse_call(fuse_reply_err(req, EINVAL),
                             "do_write(%lu): fuse_reply_err(EINVAL) [2] returned: ", ino);
             return;
         }
 
         // Do we have enough for payload header?
         if (remaining_bytes < sizeof(sigfs_payload_t)) {
-            SIGFS_LOG_INDEX_WARNING(index,
-                                    "do_write(%lu): Unaligned length at %lu bytes. Need at least %lu bytes to process next sigfs_payload_t record. Got %lu bytes",
-                                    ino, size - remaining_bytes, sizeof(sigfs_payload_t), remaining_bytes);
+            SIGFS_LOG_WARNING("do_write(%lu): Unaligned length at %lu bytes. Need at least %lu bytes to process next sigfs_payload_t record. Got %lu bytes",
+                              ino, size - remaining_bytes, sizeof(sigfs_payload_t), remaining_bytes);
 
-            check_fuse_call(index,
-                            fuse_reply_err(req, EINVAL),
+            check_fuse_call(fuse_reply_err(req, EINVAL),
                             "do_write(%lu): fuse_reply_err(EINVAL) [3] returned: ", ino);
 
             return;
@@ -709,23 +676,22 @@ static void do_write(fuse_req_t req, fuse_ino_t ino, const char *buffer,
         // Queue signal.
         //
         sub->queue()->queue_signal(payload->payload, payload->payload_size);
-        SIGFS_LOG_INDEX_DEBUG(index, "do_write(%lu): Queued %d payload bytes", ino,payload->payload_size);
+        SIGFS_LOG_DEBUG("do_write(%lu): Queued %d payload bytes", ino,payload->payload_size);
         remaining_bytes -= SIGFS_PAYLOAD_SIZE(payload);
         buffer += SIGFS_PAYLOAD_SIZE(payload);
     }
 
 
     // if (offset != 0) {
-    //     SIGFS_LOG_INDEX_FATAL(sub->sub_id(),"do_write(%lu): offset is %lu. Needs to be 0", ino,offset);
+    //     SIGFS_LOG_FATAL("do_write(%lu): offset is %lu. Needs to be 0", ino,offset);
     //     exit(1);
     // }
 
-    check_fuse_call(SIGFS_NIL_INDEX,
-                    fuse_reply_write(req, size),
+    check_fuse_call(fuse_reply_write(req, size),
                     "do_write(%lu): fuse_reply_write(%lu) returned: ",
                     ino, size);
 
-    SIGFS_LOG_INDEX_DEBUG(index, "do_write(%lu): Processed %d bytes", ino, size);
+    SIGFS_LOG_DEBUG("do_write(%lu): Processed %d bytes", ino, size);
 }
 
 void  do_poll(fuse_req_t req,
@@ -736,7 +702,7 @@ void  do_poll(fuse_req_t req,
     // It works. Stop whining.
     PolledSubscriber* sub{(PolledSubscriber*) fi->fh};
 
-    SIGFS_LOG_INDEX_DEBUG(SIGFS_NIL_INDEX, "do_poll(%lu/%p): Called", ino, fi);
+    SIGFS_LOG_DEBUG("do_poll(%lu/%p): Called", ino, fi);
 
     // Check if we are polling for POLLIN and have
     // elements available for reading.
@@ -745,14 +711,11 @@ void  do_poll(fuse_req_t req,
     if ((fi->poll_events & POLLIN) && sub->signal_available() > 0)
         immediate_events |= POLLIN;
 
-#warning CONTINUE HERE
-    if ((fi->poll_events & POLLOUT) && sub->signal_available() > 0) 
-        immediate_events |= POLLOUT;
 
     // Do we have either poll in or poll out?
     if (immediate_events) {
-        check_fuse_call(SIGFS_NIL_INDEX,
-                        fuse_reply_poll(req, immediate_events),
+        SIGFS_LOG_DEBUG("do_poll(%lu/%p): Immediate event is available", ino, fi);
+        check_fuse_call(fuse_reply_poll(req, immediate_events),
                         "do_poll(%lu): fuse_reply_poll(POLLIN) returned: ", ino);
 
         if (ph)
@@ -769,9 +732,9 @@ void  do_poll(fuse_req_t req,
     // poll_events() will setup the necessary subscription.
     sub->poll_events(fi->poll_events);
 
-    check_fuse_call(SIGFS_NIL_INDEX,
-                    fuse_reply_err(req, EINVAL),
-                    "do_poll(%lu): fuse_reply_err(EINVAL) [1] returned: ", ino);
+    SIGFS_LOG_DEBUG("do_poll(%lu/%p): No immediate event is available", ino, fi);
+    check_fuse_call(fuse_reply_poll(req, 0x0000),
+                    "do_poll(%lu): fuse_reply_poll(0x0000) [1] returned: ", ino);
     return;
 }
 
@@ -944,7 +907,6 @@ int main(int argc, char *argv[])
           .utime       = do_utime,
           .statfs      = do_statfs,
           .flush       = do_flush,
-          .release     = do_release,
           .fsync       = do_fsync,
           .setxattr    = do_setxattr,
           .getxattr    = do_getxattr,
@@ -973,6 +935,7 @@ int main(int argc, char *argv[])
         .open	     = do_open,
         .read	     = do_read,
         .write	     = do_write,
+        .release     = do_release,
         .readdir     = do_readdir,
         .poll        = do_poll,
     };

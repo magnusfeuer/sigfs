@@ -25,7 +25,7 @@ namespace sigfs {
                                signal_callback_t<CallbackT>& cb) const
     {
 
-        SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): Called", sub.sig_id());
+        SIGFS_LOG_DEBUG("dequeue_signal(): Called", sub.sig_id());
 
         // Have we lost signals?
         // We have the sig_id of currently stored signal in queue[index(sub->sig_id())].sig_id()
@@ -39,7 +39,7 @@ namespace sigfs {
         /*
           {
           std::unique_lock prio_lock(prio_mutex_);
-          SIGFS_LOG_INDEX_DEBUG(sub->sub_id(), "dequeue_signal(): Prio lock acquired", sub->sig_id());
+          SIGFS_LOG_DEBUG("dequeue_signal(): Prio lock acquired", sub->sig_id());
           active_subscribers_++;
           }
         */
@@ -61,15 +61,14 @@ namespace sigfs {
                 // a new signal to arrive. Continue waiting
                 //
                 if (self.head() == self.tail() || self.queue_[self.index(sub.sig_id())].sig_id() < sub.sig_id()) {
-                    // SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
-                    //                       "dequeue_signal(): head(%lu) %s tail(%lu) --- self.queue_[self.index(sub.sig_id(%u))].sig_id(%lu) - sub.sig_id(%lu) = %ld -> Do not exit wait",
-                    //                       self.head(),
-                    //                       ((self.head() == self.tail())?"==":"!="),
-                    //                       self.tail(),
-                    //                       sub.sig_id(),
-                    //                       self.queue_[self.index(sub.sig_id())].sig_id(),
-                    //                       sub.sig_id(),
-                    //                       (self.queue_[self.index(sub.sig_id())].sig_id() - sub.sig_id()));
+                    // SIGFS_LOG_DEBUG("dequeue_signal(): head(%lu) %s tail(%lu) --- self.queue_[self.index(sub.sig_id(%u))].sig_id(%lu) - sub.sig_id(%lu) = %ld -> Do not exit wait",
+                    //                   self.head(),
+                    //                   ((self.head() == self.tail())?"==":"!="),
+                    //                   self.tail(),
+                    //                   sub.sig_id(),
+                    //                   self.queue_[self.index(sub.sig_id())].sig_id(),
+                    //                   sub.sig_id(),
+                    //                   (self.queue_[self.index(sub.sig_id())].sig_id() - sub.sig_id()));
                     return false;
                 }
 
@@ -80,26 +79,25 @@ namespace sigfs {
                 //
                 // In either case, exit conditional wait.
                 //
-                // SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
-                //                       "dequeue_signal(): head(%lu) %s tail(%lu) --- self.queue_[self.index(sub.sig_id(%u))].sig_id(%lu) - sub.sig_id(%lu) = %ld -> Exit wait",
-                //                       self.head(),
-                //                       ((self.head() == self.tail())?"==":"!="),
-                //                       self.tail(),
-                //                       sub.sig_id(),
-                //                       self.queue_[self.index(sub.sig_id())].sig_id(),
-                //                       sub.sig_id(),
-                //                       (self.queue_[self.index(sub.sig_id())].sig_id() - sub.sig_id()));
+                // SIGFS_LOG_DEBUG("dequeue_signal(): head(%lu) %s tail(%lu) --- self.queue_[self.index(sub.sig_id(%u))].sig_id(%lu) - sub.sig_id(%lu) = %ld -> Exit wait",
+                //                   self.head(),
+                //                   ((self.head() == self.tail())?"==":"!="),
+                //                   self.tail(),
+                //                   sub.sig_id(),
+                //                   self.queue_[self.index(sub.sig_id())].sig_id(),
+                //                   sub.sig_id(),
+                //                   (self.queue_[self.index(sub.sig_id())].sig_id() - sub.sig_id()));
                 return true;
             };
 
         {
             std::unique_lock<std::mutex> lock(read_ready_mutex_);
-            SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): Lock acquired");
+            SIGFS_LOG_DEBUG("dequeue_signal(): Lock acquired");
 
             // Wait for condition to be fulfilled.
             read_ready_cond_.wait(lock, check);
 
-            SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): condition signalled");
+            SIGFS_LOG_DEBUG("dequeue_signal(): condition signalled");
             // Were we interrupted?
             if (sub.is_interrupted()) {
                 (void) cb( userdata, 0, 0, 0, 0, 0);
@@ -114,11 +112,10 @@ namespace sigfs {
             // Update subscriber's sig_id to the oldest signal in the queue.
             //
             if (self.queue_[tail()].sig_id() > sub.sig_id()) {
-                SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
-                                      "dequeue_signal(): Tail catchup for [%lu] lost signals [%lu]->[%lu]",
-                                      queue_[tail()].sig_id() - sub.sig_id(),
-                                      sub.sig_id(),
-                                      queue_[tail()].sig_id());
+                SIGFS_LOG_DEBUG("dequeue_signal(): Tail catchup for [%lu] lost signals [%lu]->[%lu]",
+                                queue_[tail()].sig_id() - sub.sig_id(),
+                                sub.sig_id(),
+                                queue_[tail()].sig_id());
                 //
                 // sub.sig_id() is for the next signal we are expecting.
                 // queue_[tail()].sig_id() is the signal currently stored in the queue slot
@@ -142,8 +139,8 @@ namespace sigfs {
                 // We could do recursive locks and lock it one extra time, but that
                 // is a slower mutex and implementation in a very critical code path.
                 //
-                SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "dequeue_signal(): Doing callback with %lu bytes.",
-                                      queue_[index(sub.sig_id())].payload()->payload_size);
+                SIGFS_LOG_DEBUG("dequeue_signal(): Doing callback with %lu bytes.",
+                                queue_[index(sub.sig_id())].payload()->payload_size);
                 cb_result_t cb_res = cb( userdata,
                                          sub.sig_id(),
                                          queue_[index(sub.sig_id())].payload()->payload,
@@ -185,10 +182,6 @@ namespace sigfs {
           }
           }
         */
-
-        // Signal all write notification subscribers that data is available
-//        for(auto const& iter: write_notifiers_)
-//            (*iter).queue_write_ready();
 
         return true; // Not interrupted.
     }

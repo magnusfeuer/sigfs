@@ -14,6 +14,8 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <search.h>
+#include "log.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +31,8 @@ extern "C" {
     typedef int64_t usec_timestamp_t;
     extern usec_timestamp_t rmc_usec_monotonic_timestamp(void);
 
+
+    int sigfs_log_get_index(void);
     extern char* sigfs_log_timestamp(char* target);
     extern void sigfs_log_set_start_time(void);
     extern usec_timestamp_t sigfs_usec_since_start(void);
@@ -58,19 +62,12 @@ extern "C" {
 #endif
 
 #ifdef SIGFS_LOG
-#define SIGFS_LOG_DEBUG(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_DEBUG) sigfs_log(SIGFS_LOG_LEVEL_DEBUG, __FUNCTION__, __FILE__, __LINE__, SIGFS_NIL_INDEX, fmt, ##__VA_ARGS__ ); }
-#define SIGFS_LOG_COMMENT(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_COMMENT) sigfs_log(SIGFS_LOG_LEVEL_COMMENT, __FUNCTION__, __FILE__, __LINE__, SIGFS_NIL_INDEX, fmt, ##__VA_ARGS__ ); }
-#define SIGFS_LOG_INFO(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_INFO) sigfs_log(SIGFS_LOG_LEVEL_INFO, __FUNCTION__, __FILE__, __LINE__, SIGFS_NIL_INDEX, fmt, ##__VA_ARGS__); }
-#define SIGFS_LOG_WARNING(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_WARNING) sigfs_log(SIGFS_LOG_LEVEL_WARNING, __FUNCTION__, __FILE__, __LINE__, SIGFS_NIL_INDEX, fmt, ##__VA_ARGS__); }
-#define SIGFS_LOG_ERROR(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_ERROR) sigfs_log(SIGFS_LOG_LEVEL_ERROR, __FUNCTION__, __FILE__, __LINE__, SIGFS_NIL_INDEX, fmt, ##__VA_ARGS__); }
-#define SIGFS_LOG_FATAL(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_FATAL) sigfs_log(SIGFS_LOG_LEVEL_FATAL, __FUNCTION__, __FILE__, __LINE__, SIGFS_NIL_INDEX, fmt, ##__VA_ARGS__); }
-
-#define SIGFS_LOG_INDEX_DEBUG(index, fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_DEBUG) sigfs_log(SIGFS_LOG_LEVEL_DEBUG, __FUNCTION__, __FILE__, __LINE__, index, fmt, ##__VA_ARGS__ ); }
-#define SIGFS_LOG_INDEX_COMMENT(index, fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_COMMENT) sigfs_log(SIGFS_LOG_LEVEL_COMMENT, __FUNCTION__, __FILE__, __LINE__, index, fmt, ##__VA_ARGS__ ); }
-#define SIGFS_LOG_INDEX_INFO(index, fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_INFO) sigfs_log(SIGFS_LOG_LEVEL_INFO, __FUNCTION__, __FILE__, __LINE__, index, fmt, ##__VA_ARGS__); }
-#define SIGFS_LOG_INDEX_WARNING(index, fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_WARNING) sigfs_log(SIGFS_LOG_LEVEL_WARNING, __FUNCTION__, __FILE__, __LINE__, index, fmt, ##__VA_ARGS__); }
-#define SIGFS_LOG_INDEX_ERROR(index, fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_ERROR) sigfs_log(SIGFS_LOG_LEVEL_ERROR, __FUNCTION__, __FILE__, __LINE__, index, fmt, ##__VA_ARGS__); }
-#define SIGFS_LOG_INDEX_FATAL(index, fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_FATAL) sigfs_log(SIGFS_LOG_LEVEL_FATAL, __FUNCTION__, __FILE__, __LINE__, index, fmt, ##__VA_ARGS__); }
+#define SIGFS_LOG_DEBUG(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_DEBUG) sigfs_log(SIGFS_LOG_LEVEL_DEBUG, __FUNCTION__, __FILE__, __LINE__, sigfs_log_get_index(), fmt, ##__VA_ARGS__ ); }
+#define SIGFS_LOG_COMMENT(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_COMMENT) sigfs_log(SIGFS_LOG_LEVEL_COMMENT, __FUNCTION__, __FILE__, __LINE__, sigfs_log_get_index(), fmt, ##__VA_ARGS__ ); }
+#define SIGFS_LOG_INFO(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_INFO) sigfs_log(SIGFS_LOG_LEVEL_INFO, __FUNCTION__, __FILE__, __LINE__, sigfs_log_get_index(), fmt, ##__VA_ARGS__); }
+#define SIGFS_LOG_WARNING(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_WARNING) sigfs_log(SIGFS_LOG_LEVEL_WARNING, __FUNCTION__, __FILE__, __LINE__, sigfs_log_get_index(), fmt, ##__VA_ARGS__); }
+#define SIGFS_LOG_ERROR(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_ERROR) sigfs_log(SIGFS_LOG_LEVEL_ERROR, __FUNCTION__, __FILE__, __LINE__, sigfs_log_get_index(), fmt, ##__VA_ARGS__); }
+#define SIGFS_LOG_FATAL(fmt, ...) { if (_sigfs_log_level >= SIGFS_LOG_LEVEL_FATAL) sigfs_log(SIGFS_LOG_LEVEL_FATAL, __FUNCTION__, __FILE__, __LINE__, sigfs_log_get_index(), fmt, ##__VA_ARGS__); }
 #else
 #define SIGFS_LOG_DEBUG(fmt, ...) { }
 #define SIGFS_LOG_COMMENT(fmt, ...) { }
@@ -78,13 +75,6 @@ extern "C" {
 #define SIGFS_LOG_WARNING(fmt, ...) { }
 #define SIGFS_LOG_ERROR(fmt, ...) { }
 #define SIGFS_LOG_FATAL(fmt, ...) { }
-
-#define SIGFS_LOG_INDEX_DEBUG(index, fmt, ...) { }
-#define SIGFS_LOG_INDEX_COMMENT(index, fmt, ...) { }
-#define SIGFS_LOG_INDEX_INFO(index, fmt, ...) { }
-#define SIGFS_LOG_INDEX_WARNING(index, fmt, ...) { }
-#define SIGFS_LOG_INDEX_ERROR(index, fmt, ...) { }
-#define SIGFS_LOG_INDEX_FATAL(index, fmt, ...) { }
 #endif
 
 #ifdef __cplusplus

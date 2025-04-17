@@ -16,7 +16,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include <thread>
+#include <atomic>
 #include <mutex>
+#include <map>
 
 static usec_timestamp_t start_time = 0;
 
@@ -24,7 +26,34 @@ int _sigfs_log_level = SIGFS_LOG_LEVEL_NONE;
 int _sigfs_log_use_color = -1;
 int _sigfs_log_use_color_calculated = 0;
 FILE *_sigfs_log_file = 0;
+ENTRY* thread_table = 0;
+class LogThread;
 
+class LogThread {
+public:
+    LogThread(std::thread::id thread_id) {
+        thread_id_ = thread_id;
+        static std::atomic<int> next_thread_index(0);
+        thread_index_ = next_thread_index++;
+    }
+
+    LogThread(const LogThread& org):
+        thread_id_(org.thread_id_),
+        thread_index_(org.thread_index_)
+    {}
+
+    ~LogThread(void) {
+    }
+
+    int get_index(void) const
+    {
+        return thread_index_;
+    }
+
+private:
+    std::thread::id thread_id_;
+    int thread_index_;
+};
 
 // Run when the library is loaded
 static void __attribute__((constructor)) log_level_set_on_env(void)
@@ -35,6 +64,21 @@ static void __attribute__((constructor)) log_level_set_on_env(void)
         return;
 
     sigfs_log_level_set(atoi(log_level));
+}
+
+int sigfs_log_get_index(void)
+{
+    static std::map<std::thread::id, const LogThread> thread_map;
+    static std::mutex mutex_;
+    std::unique_lock lock(mutex_);
+    std::thread::id thread_id(std::this_thread::get_id());
+    auto log_thread(thread_map.find(thread_id));
+
+    if (log_thread == thread_map.end()) {
+        thread_map.insert(std::pair<std::thread::id, const LogThread>(thread_id, LogThread(thread_id)));
+        log_thread = thread_map.find(thread_id);
+    }
+    return log_thread->second.get_index();
 }
 
 

@@ -143,20 +143,15 @@ namespace sigfs {
 
         void initialize_subscriber(Subscriber& sub) const;
 
-        void subscribe_read_ready_notifications(std::shared_ptr<Subscriber> subscriber) {
-//            read_notifiers_.insert(subscriber);
+        void subscribe_read_ready_notifications(Subscriber* subscriber) {
+            std::lock_guard<std::mutex> lock(read_notifiers_mutex_);
+            read_notifiers_.insert(subscriber);
         }
 
-        void subscribe_write_ready_notifications(std::shared_ptr<Subscriber> subscriber) {
-//            write_notifiers_.insert(subscriber);
-        }
 
-        void unsubscribe_read_ready_notifications(std::shared_ptr<Subscriber> subscriber) {
-//            read_notifiers_.erase(subscriber);
-        }
-
-        void unsubscribe_write_ready_notifications(std::shared_ptr<Subscriber> subscriber) {
-//            write_notifiers_.erase(subscriber);
+        void unsubscribe_read_ready_notifications(Subscriber* subscriber) {
+            std::lock_guard<std::mutex> lock(read_notifiers_mutex_);
+            read_notifiers_.erase(subscriber);
         }
 
     private:
@@ -275,10 +270,12 @@ namespace sigfs {
             payload_t* payload_;
         };
 
+        std::set<Subscriber*> read_notifiers_;
 
         mutable std::mutex read_ready_mutex_;
         mutable std::condition_variable read_ready_cond_;
 
+        mutable std::mutex read_notifiers_mutex_;
 
         // Conditional variable setup used to
         // ensure that subscriber threads always have priority
