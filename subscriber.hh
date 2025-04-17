@@ -19,6 +19,29 @@
 namespace sigfs {
     using index_t = std::int32_t;
 
+    // We will create one subscriber for each call made to
+    // sigfs.cc::do_open(), which is done when a process calls open(2)
+    // to open a file.
+    //
+    // The opened file, described by fs.hh::FileSystem::File, will
+    // have a single queue, subscribed to by multiple Subscribers.
+    //
+    // When open(2) is called, a file descriptor is assigned, and libfuse
+    // will map that descriptor to a fuse_file_info struct that is forwarded
+    // to sigfs.cc::do_open().
+    //
+    // do_open() will create a new Subscriber instance bound to the
+    // File's fs.hh::FileSystem::File::queue_ and assign its pointer
+    // to fuse_file_info::fh.
+    //
+    // In other words, each opened file descriptor will have their own
+    // own Subscriber instance that, in its turn, is mapped to the
+    // File's queue.
+    //
+    // This is also true when a single file is opened multiple times
+    // (for reading and writing), where each open() operation is assigned
+    // their own file descriptor / Subscriber pair.
+    //
     class Subscriber {
     public:
         Subscriber(std::shared_ptr<Queue> queue):
@@ -33,6 +56,20 @@ namespace sigfs {
             sub_id_ = next_sub_id++;
             queue_->initialize_subscriber(*this);
         };
+
+        virtual ~Subscriber(void)
+        {}
+
+
+        // Called by Queue when dequeue() has been called and freed up
+        // space for others to call queue()
+        //
+        virtual void queue_write_ready(void) {};
+
+        // Called by Queue when queue() has been called and installed
+        // data for others to retreive with dequeue()
+        //
+        virtual void queue_read_ready(void) {};
 
         inline const int sub_id(void) const
         {

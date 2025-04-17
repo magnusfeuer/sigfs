@@ -18,6 +18,7 @@
 #include <iostream>
 #include <variant>
 #include "queue.hh"
+#include <mutex>
 
 using json=nlohmann::json;
 namespace sigfs {
@@ -187,6 +188,7 @@ namespace sigfs {
         private:
             const Queue::index_t queue_length_;
             std::shared_ptr<Queue> queue_;
+            mutable std::mutex mutex_; // Used to guard queue creation in queue() call.
         };
 
 

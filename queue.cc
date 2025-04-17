@@ -88,7 +88,7 @@ void Queue::queue_signal(const char* data, const size_t data_size)
 
     //
     // Create a conditional wait that will wait for no active subscribers to
-    // be calling next_signal() and a successful lock of mutex_()
+    // be calling next_signal() and a successful lock of mutex_
     //
     /*
     {
@@ -115,7 +115,7 @@ void Queue::queue_signal(const char* data, const size_t data_size)
     // is the lock.
     //
     {
-        std::unique_lock lock(mutex_);
+        std::unique_lock lock(read_ready_mutex_);
 
         SIGFS_LOG_DEBUG("queue_signal(): Assigned signal ID [%lu]", next_sig_id_);
         queue_[head_].set(next_sig_id_, data, data_size);
@@ -134,9 +134,17 @@ void Queue::queue_signal(const char* data, const size_t data_size)
         // Nil Sig ID for clarity. No functionality is associated with this.
         queue_[head_].set_sig_id(0);
 
-        // Notify other queue_signal() callers waiting on conditional lock above
-        cond_.notify_all();
+        // Notify all read waiting for this data.
+        SIGFS_LOG_DEBUG("queue_signal(): Will notify %d readers waiting on signal", read_notifiers_.size());
+        {
+            std::lock_guard<std::mutex> lock(read_notifiers_mutex_);
+            for(auto iter: read_notifiers_) {
+                iter->queue_read_ready();
+            }
+        }
     }
+    // Notify other dequeue_signal() callers waiting on conditional lock above
+    read_ready_cond_.notify_all();
 
     return;
 }
@@ -145,8 +153,8 @@ void Queue::queue_signal(const char* data, const size_t data_size)
 
 const signal_count_t Queue::signal_available(const Subscriber& sub) const
 {
-    SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "signal_available(): Called");
-    std::unique_lock lock(mutex_);
+    SIGFS_LOG_DEBUG("signal_available(): Called");
+    std::unique_lock lock(read_ready_mutex_);
 
     return signal_available_(sub);
 }
@@ -154,51 +162,49 @@ const signal_count_t Queue::signal_available(const Subscriber& sub) const
 const bool Queue::signal_available_(const Subscriber& sub) const
 {
     if (head() == tail() || index(sub.sig_id()) == head()) {
-        SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
-                              "signal_available(): head{%u} %s tail{%u} --- index(sub.sig_id{%lu}){%u} %s head{%u} -> SIgnal not available.",
-                              head(),
-                              ((head() == tail())?"==":"!="),
-                              tail(),
+        SIGFS_LOG_DEBUG("signal_available(): head{%u} %s tail{%u} --- index(sub.sig_id{%lu}){%u} %s head{%u} -> Signal not available.",
+                        head(),
+                        ((head() == tail())?"==":"!="),
+                        tail(),
 
-                              sub.sig_id(),
-                              index(sub.sig_id()),
-                              ((index(sub.sig_id()) == head())?"==":"!="),
-                              head());
+                        sub.sig_id(),
+                        index(sub.sig_id()),
+                        ((index(sub.sig_id()) == head())?"==":"!="),
+                        head());
         return false;
     }
 
-    SIGFS_LOG_INDEX_DEBUG(sub.sub_id(),
-                          "signal_available(): head{%u} %s tail{%u} --- index(sub.sig_id{%lu}){%u} %s head{%u} -> Signal available.",
-                          head(),
-                          ((head() == tail())?"==":"!="),
-                          tail(),
+    SIGFS_LOG_DEBUG("signal_available(): head{%u} %s tail{%u} --- index(sub.sig_id{%lu}){%u} %s head{%u} -> Signal available.",
+                    head(),
+                    ((head() == tail())?"==":"!="),
+                    tail(),
 
-                          sub.sig_id(),
-                          index(sub.sig_id()),
-                          ((index(sub.sig_id()) == head())?"==":"!="),
-                          head());
+                    sub.sig_id(),
+                    index(sub.sig_id()),
+                    ((index(sub.sig_id()) == head())?"==":"!="),
+                    head());
     return true;
 }
 
 void Queue::interrupt_dequeue(Subscriber& sub)
 {
-    SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "interrupt_dequeue(): Called", sub.sig_id());
-    std::unique_lock<std::mutex> lock(mutex_);
-    SIGFS_LOG_INDEX_DEBUG(sub.sub_id(), "interrupt_dequeue(): Lock acquired", sub.sig_id());
+    SIGFS_LOG_DEBUG("interrupt_dequeue(): Called");
+    std::unique_lock<std::mutex> lock(read_ready_mutex_);
+    SIGFS_LOG_DEBUG("interrupt_dequeue(): Lock acquired");
 
     // Wait for condition to be fulfilled.
-    cond_.wait(lock, [](void) { return true; });
+    read_ready_cond_.wait(lock, [](void) { return true; });
 
     sub.set_interrupted(true);
     //
     // Wake up all waiting threads to force them to check
     // if their interrupt flag is set.
     //
-    cond_.notify_all();
+    read_ready_cond_.notify_all();
 }
 
 void Queue::initialize_subscriber(Subscriber& sub) const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(read_ready_mutex_);
     sub.set_sig_id(next_sig_id_);
 }

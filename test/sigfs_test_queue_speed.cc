@@ -106,10 +106,9 @@ void check_signal_sequence(std::shared_ptr<sigfs::Queue> queue,
 
             // Find correct prefix
             for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
-                SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                                      "Checking payload first four bytes [%.8X] bytes against prefix [%.8X]",
-                                      *((int*)payload),
-                                      prefix_ids[prefix_ind]);
+                SIGFS_LOG_DEBUG("Checking payload first four bytes [%.8X] bytes against prefix [%.8X]",
+                                *((int*)payload),
+                                prefix_ids[prefix_ind]);
 
                 if (*((int*)payload) == prefix_ids[prefix_ind])
                     break;
@@ -117,22 +116,19 @@ void check_signal_sequence(std::shared_ptr<sigfs::Queue> queue,
 
             // Did we not recognize prefix?
             if (prefix_ind == prefix_count) {
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                      "No prefix matched first four payload bytes [%.8X]",
-                                      *((int*) payload));
+                SIGFS_LOG_FATAL("No prefix matched first four payload bytes [%.8X]",
+                                *((int*) payload));
 
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(),  "Available prefixes are:");
+                SIGFS_LOG_FATAL( "Available prefixes are:");
 
                 for (prefix_ind = 0; prefix_ind < prefix_count; ++prefix_ind) {
-                    SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                          "   [%.8X]",
-                                          prefix_ids[prefix_ind]);
+                    SIGFS_LOG_FATAL("   [%.8X]",
+                                    prefix_ids[prefix_ind]);
                 }
                 exit(1);
             }
 
-            SIGFS_LOG_INDEX_DEBUG(sub->sub_id(),
-                                  "Comparing expected signal ID [%.3d][%.8d] with received [%.3d][%.8d]. %d signals left.",
+            SIGFS_LOG_DEBUG("Comparing expected signal ID [%.3d][%.8d] with received [%.3d][%.8d]. %d signals left.",
                                   prefix_ids[prefix_ind], expect_sigid[prefix_ind],
                                   *((int*) payload),
                                   *((int*) (payload + sizeof(int))),
@@ -140,8 +136,7 @@ void check_signal_sequence(std::shared_ptr<sigfs::Queue> queue,
 
             // Check that the rest of the signal payload after prefix matches expectations.
             if (*((int*) (payload + sizeof(int))) != expect_sigid[prefix_ind]) {
-                SIGFS_LOG_INDEX_FATAL(sub->sub_id(),
-                                      "Expected signal ID [%.3d][%.8d], received [%.3d][%.8d]",
+                SIGFS_LOG_FATAL(      "Expected signal ID [%.3d][%.8d], received [%.3d][%.8d]",
                                       prefix_ids[prefix_ind], expect_sigid[prefix_ind],
                                       *((int*) payload),
                                       *((int*) (payload + sizeof(int))));

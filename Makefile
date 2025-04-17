@@ -2,7 +2,7 @@
 # Top-level makefile for sigfs
 #
 
-.PHONY: all clean debug install install-examples install-test uninstall test examples
+.PHONY: all clean debug install install-examples install-test uninstall test examples test_suite
 
 HDR=queue.hh subscriber.hh sigfs_common.h log.h queue_impl.hh fs.hh
 
@@ -30,9 +30,9 @@ CXXFLAGS ?=-O3 -DSIGFS_LOG ${INCLUDES} -std=c++20 -Wall -pthread
 #
 # Build the entire project.
 #
-all:  ${SIGFS} ${SIGFS_TEST}
+all:  ${SIGFS} ${SIGFS_TEST} test_suite
 
-debug: ${SIGFS} ${SIGFS_TEST}
+debug: ${SIGFS} ${SIGFS_TEST} test_suite
 
 #
 #	Rebuild the static target library.
@@ -46,6 +46,9 @@ ${SIGFS}: ${SIGFS_OBJ}
 #
 ${SIGFS_TEST}: ${SIGFS_TEST_OBJ}
 	${CXX} -o ${SIGFS_TEST} ${SIGFS_TEST_OBJ} ${CXXFLAGS} `pkg-config fuse3 --cflags --libs`
+
+test_suite:
+	(cd test; ${MAKE} CXXFLAGS="${CXXFLAGS}")
 
 
 ${SIGFS_OBJ}: ${HDR}

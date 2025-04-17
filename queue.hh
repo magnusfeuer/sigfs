@@ -11,6 +11,7 @@
 #include "sigfs_common.h"
 #include <functional>
 #include <mutex>
+#include <set>
 #include <condition_variable>
 #include <memory.h>
 namespace sigfs {
@@ -49,10 +50,11 @@ namespace sigfs {
         };
 
         // Callback invoked by dequeue_signal() with locked and protected payload.
+        //
         // This callbackl is invoked one or more times by
         // dequeue_signal() in order to deliver the next signal in the
-        // queue for the subscriber provided to dequeue_signal().
-        // The following argbuments are provided
+        // queue for the subscriber provided to dequeue_signal().  The
+        // following arguments are provided:
         //
         // userdata - Same argument as provided to dequeue_signal().
         // signal_id - Unique ID for the signal, will never be repeated for the lifespan of self.
@@ -97,7 +99,7 @@ namespace sigfs {
         // are done with the relevant resoruces mutex-locked only once at the beginning
         // of the dequeue_signal() call.
         //
-        // If not singal is available, this method will block until
+        // If not signal is available, this method will block until
         // another thread calls queue_signal().
         //
         // See below for instructions on how to interrupt this call.
@@ -135,11 +137,22 @@ namespace sigfs {
         void dump(const char* prefix, const Subscriber& sub);
 
         inline const signal_id_t tail_sig_id(void) const {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::mutex> lock(read_ready_mutex_);
             return tail_sig_id_();
         }
 
         void initialize_subscriber(Subscriber& sub) const;
+
+        void subscribe_read_ready_notifications(Subscriber* subscriber) {
+            std::lock_guard<std::mutex> lock(read_notifiers_mutex_);
+            read_notifiers_.insert(subscriber);
+        }
+
+
+        void unsubscribe_read_ready_notifications(Subscriber* subscriber) {
+            std::lock_guard<std::mutex> lock(read_notifiers_mutex_);
+            read_notifiers_.erase(subscriber);
+        }
 
     private:
 
@@ -257,16 +270,18 @@ namespace sigfs {
             payload_t* payload_;
         };
 
+        std::set<Subscriber*> read_notifiers_;
 
-        mutable std::mutex mutex_;
-        mutable std::condition_variable cond_;
+        mutable std::mutex read_ready_mutex_;
+        mutable std::condition_variable read_ready_cond_;
 
+        mutable std::mutex read_notifiers_mutex_;
 
         // Conditional variable setup used to
         // ensure that subscriber threads always have priority
         //
-        mutable std::mutex prio_mutex_;
-        mutable std::condition_variable prio_cond_;
+//        mutable std::mutex prio_mutex_;
+//        mutable std::condition_variable prio_cond_;
         mutable int active_subscribers_;
 
         signal_id_t next_sig_id_; // Monotonic transaction id.
